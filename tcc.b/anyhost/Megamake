@@ -1,0 +1,44 @@
+# Megamake - Makefile creating Meta-Makefile
+# Copyright (C) Advanced RISC Machines 1994. All rights reserved.
+# SPDX-Licence-Identifier: Apache-2.0
+#
+# RCS $Revision$
+# Checkin $Date$
+# Revising $Author$
+
+DEP=shared
+
+include $(MEGAMAKE_INCLUDE)
+
+# Default directory to look for options.h
+OPTIONS=ccthumb ### what's the difference bewtween cc{arm,thumb}/options.h?
+BACKEND=thumb
+
+TOOLNAME=tcc
+TOOLDESTNAME=$(TOOLNAME)
+
+SRCDIR1=../../$(OPTIONS)
+SRCDIR2=../../$(BACKEND)
+SRCDIR3=../../cfe
+SRCDIR4=../../mip
+SRCDIR5=../../util
+SRCDIR6=../../armthumb
+
+include $(DEPSRCDIR)/../../armcc.b/anyhost/CommonMega
+
+SOURCES=$(COMMON_SOURCES) $(BACKEND_SOURCES)
+
+# List of all object code files to be found in the build area, which must be
+# built in order to make the tool concerned.
+OBJALL=$(COMMON_OBJALL) $(BACKEND_OBJALL) $(C_OBJALL)
+
+tool_only: $(DERIVED)
+	$(PN) $(PFL) "CFLlex=$(DFL)TARGET_IS_ARM%;"        >> $(MAKEFILE)
+	$(PN) $(PFL) "CFLpp=$(DFL)TARGET_IS_ARM%;"         >> $(MAKEFILE)
+	$(PN) $(PFL) "CFLsem=$(DFL)TARGET_IS_ARM%;"        >> $(MAKEFILE)
+	$(PN) $(PFL) "CFLsimplify=$(DFL)TARGET_IS_ARM%;"   >> $(MAKEFILE)
+	$(PN) $(PFL) "CFLsyn=$(DFL)TARGET_IS_ARM%;"        >> $(MAKEFILE)
+	$(PN) $(PFL) "CFLvargen=$(DFL)TARGET_IS_ARM%;"     >> $(MAKEFILE)
+	echo ""						   >> $(MAKEFILE)
+
+TARGETCFL += $(DFL)PEEPHOLER

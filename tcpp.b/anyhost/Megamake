@@ -1,0 +1,34 @@
+# Megamake - Makefile creating Meta-Makefile
+# Copyright (C) Advanced RISC Machines 1994. All rights reserved.
+# SPDX-Licence-Identifier: Apache-2.0
+#
+# RCS $Revision$
+# Checkin $Date$
+# Revising $Author$
+
+DEP=shared
+
+include $(MEGAMAKE_INCLUDE)
+
+# Default directory to look for options.h
+OPTIONS=cppthumb
+BACKEND=thumb
+
+TOOLNAME=tcpp
+TOOLDESTNAME=$(TOOLNAME)
+
+SRCDIR1=../../$(OPTIONS)
+SRCDIR2=../../$(BACKEND)
+SRCDIR3=../../cfe
+SRCDIR4=../../cppfe
+SRCDIR5=../../mip
+SRCDIR6=../../util
+SRCDIR7=../../armthumb
+
+include $(DEPSRCDIR)/../../armcc.b/anyhost/CommonMega
+
+SOURCES=$(COMMON_SOURCES) $(BACKEND_SOURCES) $(CPP_SOURCES)
+
+# List of all object code files to be found in the build area, which must be
+# built in order to make the tool concerned.
+OBJALL=$(COMMON_OBJALL) $(BACKEND_OBJALL) $(CPP_OBJALL)

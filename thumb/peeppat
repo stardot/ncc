@@ -1,0 +1,991 @@
+;;;; thumb.peeppat
+;;;; Copyright (C) Advanced Risc Machines Ltd., 1994
+;;;; SPDX-Licence-Identifier: Apache-2.0
+;;;; raw peepholer patterns for the thumb peepholer
+
+;;; RCS $Revision$
+;;; Checkin $Date$
+;;; Revising $Author$
+
+;;; from the arm peepholer unless otherwise stated
+
+; ac: check actual use of peep here, also P_CMPZ, P_PRE, P_POST
+
+;;; Tidy up after andk+andk peephole
+;;;# 1 $ok
+( ( A(op == J_ANDK) )
+  ( (== A.r3 0) )
+  ( 
+    (= A.op J_MOVK)
+    (= A.r2 GAP) 
+  )
+)
+
+;;;# 2 removed - PUSHC
+
+;;;# 3 $useful?
+; the resulting SHLK can be combined with later RR ops.
+( ( A(op == J_ADDR && peep == 0) )
+  ( (== A.r2 A.r3) )
+  ( (= A.op J_SHLK)
+    (= A.r3 1)
+  )
+)
+
+;;;# 4 $ok
+( ( A(op == J_ADDK && peep == 0)
+  )
+  ( (== A.r3 0)
+  )
+  ( (= A.op J_MOVR)
+    (= A.r3 A.r2)
+    (= A.r2 GAP)
+  )
+)
+
+;;;# 5 $ok
+;;; movr a, a => noop (remove junk from earlier peepholes - remove_noops()
+;;; in flowgraf.c filters such things from the input to localcg).
+( ( A(op == J_MOVR && peep == 0)
+  )
+  ( (== A.r1 A.r3)
+  )
+  ( (kill A)
+  )
+)
+
+;;;# 6
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r2 &! op <- (J_MOVC+J_ALIGN4 J_CLRC+J_ALIGN4
+                        J_CALLR J_MULR
+                        J_STRBR J_STRWR J_STRR))
+  )
+  ( (== A.r1 B.r2)
+    (< A.r3 8)
+  )
+  ( (= B.r2 A.r3)
+    (kill A)
+  )
+)
+
+;;;# 6
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r2 && op <- (J_MOVR J_ADDR))
+  )
+  ( (== A.r1 B.r2)
+  )
+  ( (= B.r2 A.r3)
+    (kill A)
+  )
+)
+
+;;;# 7 $ok
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r3 &! op <- (J_MOVC+J_ALIGN4 J_CLRC+J_ALIGN4
+                        J_CALLR J_MULR))
+  )
+  ( (== A.r1 B.r3)
+    (< A.r3 8)
+  )
+  ( (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;;# 7 $ok
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r3 && op <- (J_MOVR J_ADDR))
+  )
+  ( (== A.r1 B.r3)
+  )
+  ( (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;;# 8 $ok
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r1 &! op <- (J_MOVC+J_ALIGN4 J_CLRC+J_ALIGN4
+                        J_CALLR J_MULR
+                        J_STRBK J_STRWK
+                        J_LDMW J_STMW))
+  )
+  ( (== A.r1 B.r1)
+    (< A.r3 8)
+  )
+  ( (= B.r1 A.r3)
+    (kill A)
+  )
+)
+
+;;;# 8 $ok
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r1 && op <- (J_MOVR J_ADDR))
+  )
+  ( (== A.r1 B.r1)
+  )
+  ( (= B.r1 A.r3)
+    (kill A)
+  )
+)
+
+;;;# 9 $ok
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r2 &! op <- (J_MOVC+J_ALIGN4 J_CLRC+J_ALIGN4
+                        J_CALLR J_MULR
+                        J_STRBR J_STRWR J_STRR))
+  )
+  ( (== A.r1 B.r2)
+    (< A.r3 8)
+  )
+  ( (= B.r2 A.r3) )
+)
+
+;;;# 10 $ok
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r3 &! op <- (J_MOVC+J_ALIGN4 J_CLRC+J_ALIGN4
+                        J_CALLR J_MULR))
+  )
+  ( (== A.r1 B.r3)
+    (< A.r3 8)
+  )
+  ( (= B.r3 A.r3) )
+)
+
+;# 11 $ok
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r1 &! op <- (J_MOVC+J_ALIGN4 J_CLRC+J_ALIGN4
+                        J_CALLR J_MULR
+                        J_STRBK J_STRWK
+                        J_LDMW J_STMW))
+  )
+  ( (== A.r1 B.r1)
+    (< A.r3 8)
+  )
+  ( (= B.r1 A.r3) )
+)
+
+;;;# 12
+( ( A(op == J_MOVR && dead_r3)
+    B(op <- (J_MOVC+J_ALIGN4))
+  )
+  ( (== A.r1 B.r2)
+    (< A.r3 8)
+  )
+  ( (= B.r2 A.r3)
+    (= B.r4 (| B.r4 (bit A.r1)))
+    (kill A)
+  )
+)
+
+;;;# 13
+;( ( A(op == J_MOVR)
+;    B(op <- (J_MOVC+J_ALIGN4))
+;  )
+;  ( (== A.r1 B.r2)
+;    (!= A.r3 R_SP)
+;    (movc_pres_r1r2 B 0)
+;  )
+;  ( (= B.r2 A.r3)
+;    (= B.r4 (| B.r4 (bit A.r1)))
+;    (kill A)
+;  )
+;)
+
+;;;# 14
+( ( A(op == J_MOVR && dead_r3)
+    B(op <- (J_MOVC+J_ALIGN4 J_CLRC+J_ALIGN4))
+  )
+  ( (== A.r1 B.r1)
+    (< A.r3 8)
+  )
+  ( (= B.r1 A.r3)
+    (= B.r4 (| B.r4 (bit A.r1)))
+    (kill A)
+  )
+)
+
+;;;# 15
+;( ( A(op == J_MOVR)
+;    B(op <- (J_MOVC+J_ALIGN4 J_CLRC+J_ALIGN4))
+;  )
+;  ( (== A.r1 B.r1)
+;    (!= A.r3 R_SP)
+;    (movc_pres_r1r2 B (& A.dataflow J_DEAD_R2))
+;  )
+;  ( (= B.r1 A.r3)
+;    (= B.r4 (| B.r4 (bit A.r1)))
+;    (kill A)
+;  )
+;)
+
+;;;# 16 $ok
+; I suppose the peep & (P_PRE+P_POST+P_CMPZ) == 0 is just an over-explicit way
+; of saying 'has no side effects'.
+; WD: made if safe by only allowing common cases
+( ( A(op <- (J_MOVK J_MOVR J_ADDK J_ADDR J_SUBR) && peep & (P_PRE+P_POST+P_CMPZ) == 0)
+    B(loads_r1 &! uses_r1)
+  )
+  ( (== A.r1 B.r1)
+    (regset_unused (bit B.r1))
+    (regset_unkilled (bit B.r1))
+    (notcall B)
+  )
+  ( (kill A) )
+)
+
+;;;# 17 $ok
+( ( A(op <- (J_MULR))
+    B(op == J_MOVR && peep & P_CMPZ == 0)
+  )
+  ( (== A.r1 B.r3)
+    (!= B.r1 A.r3)
+    (regset_unused (bit B.r1))
+    (< B.r1 8)
+  )
+  ( (= A.r1 B.r1)
+    (kill B)
+  )
+)
+
+;;;# 18 $ok
+( ( A(op <- (J_MULR))
+    B(op == J_MOVR && peep & P_CMPZ == 0)
+  )
+  ( (== A.r1 B.r3)
+    (== B.r1 A.r3)
+    (!= B.r1 A.r2)
+    (regset_unused (bit B.r1))
+    (< B.r1 8)
+  )
+  ( (swapr2r3 A)
+    (= A.r1 B.r1)
+    (kill B)
+  )
+)
+
+;;# 19 $ok
+( ( A(sets_r1 &! op <- (
+            J_MULR
+            J_LDRK+J_ALIGN1 J_LDRWK+J_ALIGN1
+            J_LDRK+J_ALIGN1+J_UNSIGNED J_LDRWK+J_ALIGN1+J_UNSIGNED
+            J_LDRK+J_ALIGN1+J_SIGNED J_LDRWK+J_ALIGN1+J_SIGNED
+            J_LDMW J_STMW))
+    B(op == J_MOVR && peep & P_CMPZ == 0)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unused (bit B.r1))
+    (< B.r1 8)
+  )
+  ( (kill B)
+    (= A.r1 B.r1)
+  )
+)
+
+;;;# 20 removed - MLA
+;;;# 21 removed - MLA
+;;;# 22 removed - MLA
+;;;# 23 removed - MLA
+;;;# 24 removed - exit needs correct sp
+;;;# 25 removed - exit needs correct sp
+;;;# 26 removed - unsafe
+;;;# 27 removed - P_LRFREE
+
+;;;# 28 $ok
+( ( A(op == J_NOTR && peep == 0)
+    B(op == J_ANDR)
+  )
+  ( (== A.r1 B.r3) )
+  ( (kill A)
+    (= B.r3 A.r3)
+    (= B.op J_BICR)  ; original allowed A to have a literal shift
+                     ; in this replacement, but ruled it out in the
+                     ; pattern
+  )
+)
+
+;;;# 29 removed - uses RSHIFT
+
+;;;# 30 $ok
+( ( A(op == J_NOTR && peep == 0)
+    B(op == J_ANDR)
+  )
+  ( (== A.r1 B.r2) )
+  ( (kill A)
+    (swapr2r3 B)
+    (= B.r3 A.r3)
+    (= B.op J_BICR)  ; original allowed A to have a literal shift
+                     ; in this replacement, but ruled it out in the
+                     ; pattern
+  )
+)
+
+;;;# 31 removed - uses RSHIFT
+
+;;;# 32
+( ( A(op == J_MOVR && peep == 0)
+    B(op <- (J_CMPK+Q_EQ J_CMPK+Q_NE J_CMPK+Q_UEQ J_CMPK+Q_UNE))
+  )
+  ( (== B.r2 A.r3)
+    (== B.r3 0)
+    (regset_unkilled M_PC)
+  )
+  ( (kill B)
+    (= A.peep (| A.peep P_CMPZ))
+  )
+)
+
+;;;# 33
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <-
+            (       J_MOVR
+                    J_NEGR
+                    J_NOTR
+             J_ADDK J_ADDR
+                    J_SUBR ; J_SUBK turned early into J_ADDK
+             J_RSBK J_RSBR
+             J_ANDK J_ANDR
+                    J_BICR
+             J_ORRK J_ORRR
+             J_EORK J_EORR
+             J_SHLR J_SHLK
+             J_SHRR J_SHRK
+             J_RORR J_RORK
+             J_MULR J_MULK) &&
+
+      peep == 0)
+
+    B(op <- (J_CMPK+Q_EQ J_CMPK+Q_NE J_CMPK+Q_UEQ J_CMPK+Q_UNE) &&
+      dead_r2)
+  )
+  (
+    (regset_unkilled M_PC)
+    (regset_unused (bit A.r1))
+    (== B.r2 A.r1)
+    (== B.r3 0)
+  )
+  ( (kill B)
+    (= A.dataflow (| A.dataflow J_DEAD_R1))
+    (= A.peep (| A.peep P_CMPZ))
+  )
+)
+
+;;;# 34
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <-
+            (       J_MOVR
+                    J_NEGR
+                    J_NOTR
+             J_ADDK J_ADDR
+                    J_SUBR ; J_SUBK turned early into J_ADDK
+             J_RSBK J_RSBR
+             J_ANDK J_ANDR
+                    J_BICR
+             J_ORRK J_ORRR
+             J_EORK J_EORR
+             J_SHLR J_SHLK
+             J_SHRR J_SHRK
+             J_RORR J_RORK
+             J_MULR J_MULK) &&
+
+
+      peep == 0)
+
+    B(op <- (J_CMPK+Q_EQ J_CMPK+Q_NE J_CMPK+Q_UEQ J_CMPK+Q_UNE))
+  )
+  ( (regset_unkilled M_PC)
+    (== B.r2 A.r1)
+    (== B.r3 0)
+  )
+  ( (kill B)
+    (= A.peep (| A.peep P_CMPZ))
+  )
+)
+
+;;; ORRK a, b, c; ANDK d, a, e => ANDK a, b, e; ORRK d, a, c&e.
+;;;   This is chiefly to give the ANDK + ANDK and ORRK + ORRK
+;;;   peepholes a better chance.
+;;;# 35
+( ( A(op == J_ORRK)
+    B(op == J_ANDK && dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (regset_unused (bit A.r1))
+    (regset_unkilled (bit B.r2))
+  )
+  ( (= A.r3 B.r3)         ;) in parallel
+    (= B.r3 (& A.r3 B.r3)) ;)
+    (= A.op J_ANDK)
+    (= B.op J_ORRK)
+  )
+)
+
+;;;# 36 $ok
+( ( A(op == J_ANDK)
+    B(op == J_ORRK)
+  )
+  ( (== A.r1 B.r2)
+    (==  (| A.r3 B.r3) -1)
+  )
+  ( (= B.r2 A.r2)
+    (kill A)
+  )
+)
+
+;;;# 37 $ok
+( ( A(op == J_ANDK)
+    B(op == J_ANDK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r2 A.r2)
+    (= B.r3 (& A.r3 B.r3))
+    (kill A)
+  )
+)
+
+;;;# 38 $ok
+( ( A(op == J_ORRK)
+    B(op == J_ORRK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r2 A.r2)
+    (= B.r3 (| A.r3 B.r3))
+    (kill A)
+  )
+)
+
+;;;# 39 $ok
+( ( A(op == J_EORK)
+    B(op == J_EORK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r2 A.r2)
+    (= B.r3 (^ A.r3 B.r3))
+    (kill A)
+  )
+)
+
+;;;# 40 $ok
+( ( A(op == J_ADDK)
+    B(op == J_ADDK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r2 A.r2)
+    (= B.r3 (+ A.r3 B.r3))
+    (kill A)
+  )
+)
+
+;;;; At the moment we've lost deadr2(B) & unused(A.r1) => kill A from this set.
+;;;# 41 $ok
+( ( A(op == J_MOVK)
+    B(op == J_ANDK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r3 (& A.r3 B.r3))
+    (= B.r2 GAP)
+    (= B.op J_MOVK)
+  )
+)
+
+;;;# 42 $ok
+( ( A(op == J_MOVK)
+    B(op == J_ORRK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r3 (| A.r3 B.r3))
+    (= B.r2 GAP)
+    (= B.op J_MOVK)
+  )
+)
+
+;;;# 43 $ok
+( ( A(op == J_MOVK)
+    B(op == J_EORK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r3 (^ A.r3 B.r3))
+    (= B.r2 GAP)
+    (= B.op J_MOVK)
+  )
+)
+
+;;;# 44 - uses difficult_constant
+
+;;;# 45 removed - generates RSBK
+
+;;; This fixes up shortcomings in dead-code elimination, whereby dead compares
+;;; get left.  The value for the earlier compare can't be used, because
+;;; branches and condexec flush the peephole buffer.
+;;; (If this peephole is removed, compares must kill PC)
+;;;# 46 $ok
+( ( A(op & ~Q_MASK <- (J_CMPK J_CMPR J_CMPFK J_CMPFR J_CMPDK J_CMPDR))
+    B(op & ~Q_MASK <- (J_CMPK J_CMPR J_CMPFK J_CMPFR J_CMPDK J_CMPDR))
+  )
+  ((regset_unused (bit R_PSR)))
+  ( (kill A) )
+)
+
+;;; This clears up the mess left by STRW of a (large) constant
+;;;# 47 $ok
+( ( A(op == J_MOVK)
+    B(op == J_STRBK+J_ALIGN1 && dead_r1)
+  )
+  ( (== A.r1 B.r1)
+    (>u A.r3 255)
+    (regset_unused (bit B.r1))
+  )
+  ( (= A.r3 (& A.r3 255))  )
+)
+
+;;;# 48 removed - PUSHD
+
+;;# 49 $ok
+;; ADDK x,12,#n is how ADCONV x, <something> arrives at gen
+;; (and ADDK x,12,#0 has been turned into MOVR x,-,12 earlier)
+( ( A(op == J_MOVR)
+    B(op & ~(J_SIGNED+J_UNSIGNED+J_ALIGNMENT) <-
+              (J_LDRFR J_LDRDR J_STRFR J_STRDR
+               J_LDRBR J_LDRWR J_LDRR J_STRBR J_STRWR J_STRR))
+  )
+  ( (== A.peep 0)
+    (== A.r1 B.r2)
+    (< A.r3 8)
+  )
+  ( (= B.r2 A.r3)
+    (kill A)
+  )
+)
+
+;;;# 50-56 removed - PRE/POST
+
+;;;# 57 $ok
+( ( A(op & ~(J_SIGNED+J_UNSIGNED+J_ALIGNMENT) <- (J_LDRBK J_LDRBR))
+    B(op == J_ANDK)
+  )
+  ( (== B.r3 255)
+    (== A.r1 B.r2)
+    (== B.r1 B.r2)
+  )
+  ( (kill B) )
+)
+
+;;;# 57 $ok
+( ( A(op & ~(J_SIGNED+J_UNSIGNED+J_ALIGNMENT) <- (J_LDRWK J_LDRWR))
+    B(op == J_ANDK)
+  )
+  ( (== B.r3 65535)
+    (== A.r1 B.r2)
+    (== B.r1 B.r2)
+  )
+  ( (kill B) )
+)
+
+;;;# 58 removed - PUSHC
+
+;;;# 59
+( ( A(op == J_MOVC+J_ALIGN4 && peep & P_POST == 0)
+    B(op == J_ADDK && peep == 0)
+  )
+  ( (== A.r2 B.r2)
+    (== B.r1 B.r2)
+    (== A.r3 B.r3)
+    (!= A.r2 R_SP)
+    (regset_unused (bit A.r2))
+  )
+  ( (kill B)
+    (= A.peep (| A.peep P_POST))
+  )
+)
+
+;;;# 60 removed - POST
+;;;# 61 removed - MOVDK
+;;;# 62-69 removed - RSHIFT
+
+;;;; the next two are different because the constraints implied
+;;;; by the replacements are different.
+;;;# 70 $ok
+( ( A(op <- (J_ADCON J_STRING))
+    B(op == J_ADDK && dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (regset_unused (bit B.r1))
+  )
+  ( (= A.r1 B.r1)
+    (= A.r2 (+ A.r2 B.r3))
+    (kill B)
+  )
+)
+
+;;;# 71 $ok
+( ( A(op <- (J_ADCON J_STRING))
+    B(op == J_ADDK && dead_r2)
+  )
+  ( (== A.r1 B.r2)
+  )
+  ( (kill A)
+    (= B.op A.op)
+    (= B.r2 (+ A.r2 B.r3))
+    (= B.r3 A.r3)
+  )
+)
+
+;;;72-75 removed - various CALLs
+
+;;; movr a,b then movr b,a => movr a,b + noop.
+;;; kills some unintelligent argument juggling, as in
+;;; f(a, b) { g(a, b); code using a & b }
+;;;# 76 $ok
+( ( A(op == J_MOVR && peep == 0)
+    B(op == J_MOVR && peep == 0)
+  )
+  ( (== A.r1 B.r3)
+    (== A.r3 B.r1)
+    (regset_unkilled (bit B.r1))
+    (regset_unkilled (bit B.r3))
+  )
+  ( (kill B)
+  )
+)
+
+;;;# 77-78 removed - shifted values
+
+;;; store of one bitfield into another gives a redundant mask
+;;; (currently doesn't work too well, because the required (unkilled A.r1 (A B))
+;;; is widened (since the range isn't representable) to ( - - (A C))
+;;;# 79 $ok
+( ( A(op == J_MOVK)
+    B(op == J_ANDR)
+    C(op == J_ANDK)
+  )
+  ( (== A.r1 B.r2)
+    (== C.r1 C.r2)
+    (== C.r2 B.r1)
+    (== (& A.r3 C.r3) A.r3)
+  )
+  ( (kill C)
+  )
+)
+
+;;;# 80 NEED TO HANDLE 0 SHIFTS
+
+;;;# 81
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <-
+            (       J_MOVR
+                    J_NEGR
+                    J_NOTR
+             J_ADDK J_ADDR
+                    J_SUBR ; J_SUBK turned early into J_ADDK
+             J_RSBK J_RSBR
+             J_ANDK J_ANDR
+                    J_BICR
+             J_ORRK J_ORRR
+             J_EORK J_EORR
+             J_SHLR J_SHLK
+             J_SHRR J_SHRK
+             J_RORR J_RORK
+             J_MULR J_MULK) &&
+
+      peep == 0)
+
+    B(op <- (J_CMPK+Q_LT J_CMPK+Q_GE) && dead_r2)
+    C(op <- (J_B+Q_LT J_CONDEXEC+Q_LT J_B+Q_GE J_CONDEXEC+Q_GE))
+  )
+  ( (regset_unused (bit A.r1))
+    (== B.r2 A.r1)
+    (== B.r3 0)
+    (regset_unkilled M_PC)
+  )
+  ( (kill B)
+    (= A.dataflow (| A.dataflow J_DEAD_R1))
+    (= A.peep (| A.peep P_CMPZ))
+    (= C.op (^ C.op Q_MI^Q_LT))
+  )
+)
+
+;;;# 82
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <-
+            (       J_MOVR
+                    J_NEGR
+                    J_NOTR
+             J_ADDK J_ADDR
+                    J_SUBR ; J_SUBK turned early into J_ADDK
+             J_RSBK J_RSBR
+             J_ANDK J_ANDR
+                    J_BICR
+             J_ORRK J_ORRR
+             J_EORK J_EORR
+             J_SHLR J_SHLK
+             J_SHRR J_SHRK
+             J_RORR J_RORK
+             J_MULR J_MULK) &&
+
+      peep == 0)
+
+    B(op <- (J_CMPK+Q_LT J_CMPK+Q_GE))
+    C(op <- (J_B+Q_LT J_CONDEXEC+Q_LT J_B+Q_GE J_CONDEXEC+Q_GE))
+  )
+  ( (== B.r2 A.r1)
+    (== B.r3 0)
+    (regset_unkilled M_PC)
+  )
+  ( (kill B)
+    (= A.peep (| A.peep P_CMPZ))
+    (= C.op (^ C.op Q_MI^Q_LT))
+  )
+)
+
+;;; movk a, n + <op>k b,c,n => movk a, n + <op>r b, c, a
+;;;# 83
+( ( A(op == J_MOVK)
+    B(op <- (J_ADDK J_SUBK J_ANDK J_ORRK J_EORK))
+  )
+  ( (== A.r3 B.r3)
+    (!= B.r1 R_SP)
+    (regset_unkilled (bit A.r1))
+  )
+  (  (= B.op (+ B.op 1))    ; rk -> rr
+     (= B.r3 A.r1)
+  )
+)
+
+;;; in  store or load somewhere, then load from same place  replace second
+;;; load with MOVR.  I think the simple case (arising from spilled binders)
+;;; is all that needs doing: more complicated cases having already been
+;;; fixed up (CSE?).
+;;;# 84
+( ( A(op & ~J_ALIGNMENT <- (J_STRK J_LDRK) && peep == 0)
+    B(op & ~J_ALIGNMENT == J_LDRK && peep == 0)
+  )
+  ( (== A.r2 B.r2)
+    (== A.r3 B.r3)
+    (== B.r2 R_SP)
+    (nointervening G_STR)
+  )
+  ( (= B.op J_MOVR) (= B.r2 GAP) (= B.r3 A.r1)
+  )
+)
+
+;;;# 85 removed - PRE
+;;;# 86-89 removed - shifted ops
+;;;# 90-95 removed - basealigned
+
+;;;# 96
+( ( A(op == J_MOVR && peep == 0)
+    B(op <- (J_CMPK+Q_LT J_CMPK+Q_GE) && dead_r2)
+    C(op <- (J_B+Q_LT J_CONDEXEC+Q_LT J_B+Q_GE J_CONDEXEC+Q_GE))
+  )
+  ( (regset_unkilled (bit A.r3))
+    (== B.r2 A.r3)
+    (== B.r3 0)
+  )
+  ( (kill B)
+    (= A.dataflow (| A.dataflow J_DEAD_R3))
+    (= A.peep (| A.peep P_CMPZ))
+    (= C.op (^ C.op Q_MI^Q_LT))
+  )
+)
+
+;;;# 97
+( ( A(op == J_MOVR && peep == 0)
+    B(op <- (J_CMPK+Q_LT J_CMPK+Q_GE))
+    C(op <- (J_B+Q_LT J_CONDEXEC+Q_LT J_B+Q_GE J_CONDEXEC+Q_GE))
+  )
+  ( (== B.r2 A.r3)
+    (== B.r3 0)
+    (regset_unkilled (bit A.r3))
+  )
+  ( (kill B)
+    (= A.peep (| A.peep P_CMPZ))
+    (= C.op (^ C.op Q_MI^Q_LT))
+  )
+)
+
+;;;# 98-99 removed - shifted op
+;;;# 101-105 removed - calls
+;;;# 106-110 removed - POST
+
+;;;# 111 $ok
+( ( A(op == J_MOVK)
+    B(op == J_MOVK)
+  )
+  ( (== A.r1 B.r1)
+    (== A.r3 B.r3)
+    (regset_unkilled (bit A.r1))
+  )
+  ( (kill B)
+  )
+)
+
+;;;# 112 $ok
+( ( A(op == J_MOVK)
+    B(op == J_MOVK)
+    C(op <- (J_STRK J_STRR J_STRBK J_STRBR J_STRWK J_STRWR) && dead_r1)
+  )
+  ( (== A.r3 B.r3)
+    (== B.r1 C.r1)
+    (nointervening G_ANY)
+  )
+  ( (= C.r1 A.r1)
+    (kill B)
+    (= C.dataflow (& C.dataflow ~J_DEAD_R1))
+  )
+)
+
+;;;# 113 $ok
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) == J_SHLK)
+    B(op == J_SHRK+J_UNSIGNED)
+  )
+  ( (== A.r3 B.r3)
+    (== A.r1 B.r2)
+  )
+  ( (kill A)
+    (= B.op J_ANDK) (= B.r2 A.r2) (= B.r3 (- (bit (- 32 B.r3)) 1))
+  )
+)
+
+;;;# 114-117 removed - shifts
+;;;# 118 removed - cmp
+;;;# 119-120 removed - difficult_constant
+;;;# 121-126 removed - MOVD
+;;;# 127-129 removed - shifted ops
+
+;;;# 130 $ok
+( ( A(op == J_ORRK && peep == 0)
+  )
+  ( (== A.r3 0xffffffff)
+  )
+  ( (= A.op J_MOVK)
+    (= A.r2 GAP)
+  )
+)
+
+;;;# 131 $ok
+( ( A(op == J_ANDK)
+    B(op == J_ORRK)
+  )
+  ( (== A.r1 B.r2)
+    (== (& A.r3 B.r3) A.r3)
+    (regset_unused (bit A.r1))
+  )
+  ( (kill A)
+    (= B.op J_MOVK)
+  )
+)
+
+;;;# 132 removed - basealigned
+
+;;;# 133 $ok
+( ( A (op == J_ANDK)
+    B (op & ~(J_SIGNED+J_UNSIGNED) == J_SHRK)
+  )
+  ( (== A.r1 B.r2)
+    (== 0 (& (^ 0xffffffffL A.r3)
+             (- 0 (<< 1 B.r3))))
+  )
+  ( (kill A)
+    (= B.r2 A.r2)
+  )
+)
+
+;;;# 134-137 removed - PRE/POST
+
+
+
+
+;;; extra ones for thumb shifts (tested unless stated otherwise)
+
+( ( A (op & ~(J_SIGNED+J_UNSIGNED) == J_SHRK && peep == 0)
+    B (op & ~(J_SIGNED+J_UNSIGNED) == J_SHRK)
+  )
+  ( (|| (== A.op J_SHRK+J_UNSIGNED) (== A.op B.op))   ;can't do signed then unsigned
+    (== A.r1 B.r2)
+    (<= (+ A.r3 B.r3) 31)  ;else the semantics get difficult
+  )
+  ( (= B.op A.op)
+    (= B.r3 (+ A.r3 B.r3))
+    (= B.r2 A.r2)
+    (kill A)
+  )
+)
+
+( ( A (op & ~(J_SIGNED+J_UNSIGNED) == J_SHLK && peep == 0)
+    B (op & ~(J_SIGNED+J_UNSIGNED) == J_SHLK)
+  )
+  ( (== A.r1 B.r2)
+    (<= (+ A.r3 B.r3) 31)  ;else the semantics get difficult
+  )
+  ( (= B.r3 (+ A.r3 B.r3))
+    (= B.r2 A.r2)
+    (kill A)
+  )
+)
+
+;;; extra peepholes incorporated from arm/peeppat 1.46
+
+;;;# 138 omitted because of P_ADJUSTSP (this is handled by thumb/gen anyway)
+
+;;;;# 139
+;( ( A(op & ~J_ALIGNMENT <- (J_STRBK J_LDRBK+J_SIGNED) && peep & (P_PRE+P_POST) == 0)
+;    B(op & ~J_ALIGNMENT == J_LDRBK+J_UNSIGNED && peep & (P_PRE+P_POST) == 0)
+;  )
+;  ( (== A.r2 B.r2)
+;    (== A.r3 B.r3)
+;    (nointervening G_STR)
+;  )
+;  ( (= B.op J_ANDK) (= B.r2 A.r1) (= B.r3 255) (= B.peep 0)
+;  )
+;)
+;
+;;;# 140 omitted because of difficult_constant (handled by thumb/gen)
+
+;;;# 141
+( ( A(op == J_ANDK)
+    B(op <- (J_STRBK+J_ALIGN1 J_STRBR+J_ALIGN1) && dead_r1)
+  )
+  ( (== A.r3 255)
+    (== A.r1 B.r1)
+    (!= B.r2 R_SP)
+    (regset_unkilled (bit A.r2))
+  )
+  ( (kill A)
+    (= B.r1 A.r2)
+  )
+)
+
+;;; ECN: extended to halfwords for Thumb
+
+( ( A(op == J_ANDK)
+    B(op <- (J_STRWK+J_ALIGN2 J_STRWR+J_ALIGN2) && dead_r1)
+  )
+  ( (== A.r3 65535)
+    (== A.r1 B.r1)
+    (!= B.r2 R_SP)
+    (regset_unkilled (bit A.r2))
+  )
+  ( (kill A)
+    (= B.r1 A.r2)
+  )
+)
+
+( ( A(op == J_ANDK)
+    B(op & ~(J_SIGNED+J_UNSIGNED) == J_SHLK)
+  )
+  ( (== A.r3 1)
+    (== A.r1 B.r2)
+    (== B.r3 31)
+    (regset_unused (bit A.r1))
+  )
+  ( (kill A) )
+)
+
+( ( A(op == J_ANDK)
+    B(op & ~(J_SIGNED+J_UNSIGNED) == J_SHLK)
+  )
+  ( (== A.r3 1)
+    (== A.r1 B.r2)
+    (!= B.r3 31)
+    (regset_unused (bit A.r1))
+  )
+  ( (= A.op J_SHLK) (= A.r3 31)
+    (= B.op J_SHRK+J_UNSIGNED) (= B.r3 (- 31 B.r3))
+  )
+)

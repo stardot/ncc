@@ -1,0 +1,176 @@
+# CommonMega - common Megamake file for the C/C++ compilers
+# Copyright (C) Advanced RISC Machines 1996. All rights reserved.
+# SPDX-Licence-Identifier: Apache-2.0
+#
+# RCS $Revision$
+# Checkin $Date$
+# Revising $Author$
+
+######################################################################
+# This section contains TOOL specifc stuff which is NOT HOST dependent
+#  (ie. it will need customising for a particular tool, but only once)
+
+DEFSRCDIR=500
+
+CPP_SOURCES=
+
+BACKEND_SOURCES=armthumb/aaof.c armthumb/asd.c armthumb/dwasd.c \
+        $(BACKEND)/asm.c $(BACKEND)/gen.c \
+        $(BACKEND)/mcdep.c $(BACKEND)/peephole.c \
+        $(BACKEND)/mcdpriv.h $(BACKEND)/mcvsn.h $(BACKEND)/target.h $(BACKEND)/ops.h \
+        armthumb/asmsyn.c armthumb/asmcg.c armthumb/inlnasm.h \
+        mip/dwarf.c mip/dwarf1.c mip/dwarf2.c armthumb/tooledit.c \
+        armthumb/arminst.c armthumb/arminst.h armthumb/armops.h
+
+CPP_SOURCES=cppfe/doe.c cppfe/overload.c cppfe/xbind.c cppfe/xbuiltin.c \
+        cppfe/xlex.c cppfe/xsem.c cppfe/xsyn.c cppfe/xvargen.c
+
+COMMON_SOURCES=mip/aetree.c mip/bind.c mip/builtin.c mip/cg.c \
+        mip/codebuf.c mip/compiler.c mip/cse.c mip/csescan.c mip/cseeval.c \
+        mip/driver.c \
+        mip/flowgraf.c mip/inline.c mip/jopprint.c \
+        mip/misc.c mip/regalloc.c mip/regsets.c mip/sr.c \
+        mip/store.c mip/main.c mip/dump.c mip/version.c \
+        cfe/lex.c cfe/pp.c cfe/sem.c cfe/simplify.c cfe/syn.c \
+        cfe/vargen.c \
+        mip/aeops.h mip/aetree.h mip/bind.h mip/builtin.h \
+        mip/cg.h mip/cgdefs.h mip/codebuf.h mip/compiler.h \
+        mip/cse.h mip/cseguts.h mip/defaults.h mip/defs.h \
+        mip/drivhelp.h mip/flowgraf.h mip/globals.h \
+        mip/version.h mip/inline.h mip/jopcode.h  mip/mcdep.h \
+        mip/mipvsn.h \
+        mip/regalloc.h mip/regsets.h mip/sr.h mip/store.h \
+        mip/util.h mip/xrefs.h mip/dump.h mip/dw_int.h \
+        cfe/fevsn.h cfe/lex.h cfe/pp.h cfe/sem.h cfe/simplify.h \
+        cfe/syn.h cfe/vargen.h \
+        $(OPTIONS)/options.h
+
+COPY_ONLY=cl/stdh/assert.h cl/stdh/signal.h cl/stdh/ctype.h \
+        cl/stdh/stdarg.h cl/stdh/errno.h cl/stdh/stddef.h \
+        cl/stdh/float.h cl/stdh/stdio.h cl/stdh/limits.h \
+        cl/stdh/stdlib.h cl/stdh/locale.h cl/stdh/string.h \
+        cl/stdh/math.h cl/stdh/time.h cl/stdh/setjmp.h cl/stdh/iso646.h \
+        $(BACKEND)/peeppat armthumb/mcerrs.h mip/miperrs.h cfe/feerrs.h \
+        util/peepgen.c util/genhdrs.c
+
+# This bit is host dependent because of datenow.h, but we leave it here..
+DERIVED = derived/headers.c derived/peeppat.c derived/errors.h derived/tags.h
+
+tool_only: $(DERIVED)
+
+# EXTDIRn holds include files for use on the host system.  EXTOBJn is a list
+# of external object files which can be found on the host in the directory
+# EXTDIRn/$(HOST). should not need to be tool specific.
+# DEPENDINCn indicates where these includes files can be found for
+# dependency determination purposes (on SunOS).
+EXTDIR1=../../../clx
+EXTLIB1=clx.b/$(HOST)/clx
+DEPENDINC1=../../../clx
+inteldbg intelrel alphadbg alpharel := EXTDIR2=../../../armlink
+inteldbg intelrel alphadbg alpharel := EXTLIB2=cclink.b/$(HOST)/armlink
+
+# List of all object code files to be found in the build area, which must be
+# built in order to make the tool concerned.
+BACKEND_OBJALL=aaof asd dwasd asm gen mcdep peephole dwarf dwarf1 dwarf2 tooledit \
+        asmsyn asmcg arminst
+C_OBJALL=bind builtin lex sem syn vargen
+CPP_OBJALL=overload xbind xbuiltin xlex xsem xsyn xvargen
+COMMON_OBJALL=aetree cg codebuf compiler cse csescan cseeval sr flowgraf inline \
+        jopprint misc version driver main dump \
+        regalloc regsets store pp simplify
+
+# Note this only makes the derived source when dependency determination
+# is taking place during the make -f Megamake
+# Host specific versions of this must be output to the Makefile
+# in the host and tool dependent part of Megamake.
+
+HDRFILES = assert ctype errno float iso646 limits locale math setjmp \
+signal stdarg stddef stdio stdlib string time
+
+derived/headers.c: derived/genhdrs $(HDRFILES:%=$(DEPSRCDIR)/../../cl/stdh/%.h)
+	derived/genhdrs -oderived/headers.c -I$(DEPSRCDIR)/../../cl/stdh/ $(HDRFILES:%=%.h)
+
+derived/errors.h: derived/genhdrs
+derived/errors.h: $(DEPSRCDIR)/../../mip/miperrs.h
+derived/errors.h: $(DEPSRCDIR)/../../cfe/feerrs.h
+derived/errors.h: $(DEPSRCDIR)/../../armthumb/mcerrs.h
+	derived/genhdrs -ederived/errors.h -q$(DEPSRCDIR)/../../mip/miperrs.h \
+	  -q$(DEPSRCDIR)/../../cfe/feerrs.h -q$(DEPSRCDIR)/../../armthumb/mcerrs.h
+
+derived/tags.h: $(DEPSRCDIR)/../../mip/miperrs.h
+derived/tags.h: $(DEPSRCDIR)/../../cfe/feerrs.h
+derived/tags.h: $(DEPSRCDIR)/../../armthumb/mcerrs.h
+	mktag -pz $(DEPSRCDIR)/../../mip/miperrs.h $(DEPSRCDIR)/../../cfe/feerrs.h $(DEPSRCDIR)/../../armthumb/mcerrs.h derived/tags.h
+	mkmsg -pqz $(DEPSRCDIR)/../../mip/miperrs.h $(DEPSRCDIR)/../../cfe/feerrs.h $(DEPSRCDIR)/../../armthumb/mcerrs.h derived/tags.h $(TOOLNAME).err 
+
+derived/genhdrs: $(DEPSRCDIR)/../../util/genhdrs.c
+	gcc -O2 -o derived/genhdrs $(DEPSRCDIR)/../../util/genhdrs.c
+
+derived/peeppat.c: $(DEPSRCDIR)/../../$(BACKEND)/peeppat derived/peepgen 
+	derived/peepgen $(DEPSRCDIR)/../../$(BACKEND)/peeppat derived/peeppat.c
+
+derived/peepgen: $(DEPSRCDIR)/../../util/peepgen.c $(DEPSRCDIR)/../../mip/jopcode.h
+derived/peepgen: $(DEPSRCDIR)/../../$(BACKEND)/mcdpriv.h
+	gcc -O2 -o derived/peepgen $(DEPSRCDIR)/../../util/peepgen.c \
+	  -I$(DEPSRCDIR)/../../mip -I$(DEPSRCDIR)/$(SRCDIR2) \
+	  -I$(DEPSRCDIR)/$(SRCDIR1) -I$(DEPSRCDIR)/$(EXTDIR1)
+
+tool_local: $$(HOST)_exe $$(HOST)_lib
+	echo "Making local $(TOOLNAME)-specific boilerplate"
+	echo ""                                            >> $(MAKEFILE)
+	echo -n "HDRFILES="                                >> $(MAKEFILE)
+	if [ X$(GENVIA) = X ] ; then \
+	  echo $(HDRFILES:%=%.h) | $(PN) $(PFL) -a - "%F " >> $(MAKEFILE) ; \
+	else \
+	  $(PN) $(PFL) " -v%F%;" $(GENVIA)                 >> $(MAKEFILE) ; \
+	  echo $(HDRFILES:%=%.h) | $(PN) $(PFL) -a - "%F%;" > ./$(GENVIA)  ; \
+	fi
+	echo ""                                            >> $(MAKEFILE)
+	echo -n "HDRPATHS="                                >> $(MAKEFILE)
+	echo $(HDRFILES:%=../../cl/stdh/%.h) \
+	    | $(PN) $(PFL) -a - "%F "                      >> $(MAKEFILE)
+	echo ""                                            >> $(MAKEFILE)
+	echo ""                                            >> $(MAKEFILE)
+	$(PN) $(PFL) "{DERDIR}%j%R%: {DERDIR}%j%R %F %F %F%;" \
+	    errors.h genhdrs$(ESUFFIX) \
+	    ../../mip/miperrs.h  ../../cfe/feerrs.h ../../armthumb/mcerrs.h \
+	                                                   >> $(MAKEFILE)
+	$(PN) $(PFL) "% {DERDIR}%j%R -e{DERDIR}%j%R -q%F -q%F -q%F -s%;%;%;" \
+	    genhdrs$(ESUFFIX) errors.h ../../mip/miperrs.h \
+	    ../../cfe/feerrs.h ../../armthumb/mcerrs.h     >> $(MAKEFILE)
+	$(PN) $(PFL) "{DERDIR}%j%R%: %F %F %F%;" \
+	    tags.h ../../mip/miperrs.h ../../cfe/feerrs.h ../../armthumb/mcerrs.h \
+	                                                   >> $(MAKEFILE)
+	$(PN) $(PFL) "% {MKTAG} -pz %F %F %F {DERDIR}%j%R%;" \
+	    ../../mip/miperrs.h ../../cfe/feerrs.h ../../armthumb/mcerrs.h \
+	    tags.h                                         >> $(MAKEFILE)
+	$(PN) $(PFL) "% {MKMSG} -pqz %F %F %F %R%;%;" \
+	    ../../mip/miperrs.h ../../cfe/feerrs.h ../../armthumb/mcerrs.h \
+	    $(TOOLNAME).err                                >> $(MAKEFILE)
+	$(PN) $(PFL) "{DERDIR}%j%R%: {DERDIR}%j%R {HDRPATHS}%;" \
+	    headers.c genhdrs$(ESUFFIX)                    >> $(MAKEFILE)
+	$(PN) $(PFL) "% {DERDIR}%j%R -o{DERDIR}%j%R $(IFL)%F%j {HDRFILES}%;%;" \
+	    genhdrs$(ESUFFIX) headers.c ../../cl/stdh      >> $(MAKEFILE)
+	$(PN) $(PFL) "{DERDIR}%j%R%: %F%;" \
+	    genhdrs$(ESUFFIX) ../../util/genhdrs.c         >> $(MAKEFILE)
+	$(PN) $(PFL) "% {CL} {CFLAGS2} $(CFEOUT){DERDIR}%j%R %F%;%;" \
+	    genhdrs$(ESUFFIX) ../../util/genhdrs.c         >> $(MAKEFILE)
+	$(PN) $(PFL) "{DERDIR}%j%R%: %F {DERDIR}%j%R%;" peeppat.c \
+	    ../../$(BACKEND)/peeppat peepgen$(ESUFFIX)     >> $(MAKEFILE)
+	$(PN) $(PFL) "% {DERDIR}%j%R %F {DERDIR}%j%R%;%;" \
+	    peepgen$(ESUFFIX) ../../$(BACKEND)/peeppat peeppat.c >> $(MAKEFILE)
+	$(PN) $(PFL) "{DERDIR}%j%R%: %F %F %F%;" \
+	    peepgen$(ESUFFIX) ../../util/peepgen.c \
+	    ../../mip/jopcode.h ../../$(BACKEND)/mcdpriv.h >> $(MAKEFILE)
+	$(PN) $(PFL) "% {CL} {CFLAGS2} $(CFEOUT){DERDIR}%j%R %F $(IFL)%F $(IFL)%F $(IFL)%F $(IFL)%F%;%;" \
+	        peepgen$(ESUFFIX) ../../util/peepgen.c \
+	        $(EXTDIR1) ../../mip $(SRCDIR1) $(SRCDIR2) >> $(MAKEFILE)
+
+
+############################################################
+# The idea is this bit is host dependent and tool dependent
+#  (ie. it will need customising for a particular tool/host)
+
+inteldbg intelrel alphadbg alpharel := TARGETCFL += $(DFL)LINKER_IS_SUBPROGRAM
+
+#pcwatcom := GENVIA=genvia

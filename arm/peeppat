@@ -1,0 +1,3694 @@
+;;;; arm.peeppat
+;;;; Copyright (C) Advanced Risc Machines Ltd., 1991
+;;;; SPDX-Licence-Identifier: Apache-2.0
+;;;; raw peepholer patterns for the arm peepholer
+
+;;;;
+;;;; RCS $Revision$
+;;;; Checkin $Date$
+;;;; Revising $Author$
+;;;;
+
+;;; The patterns setting P_BASEALIGNED need more thought now that CSE and
+;;; flowgraf set J_BASEALIGN4 (translated to P_BASALIGNED before peepholing.
+;;; It may be that they're completely redundant.
+
+;;; Tidy up after andk+andk peephole
+;;;#  1
+( ( A(op == J_ANDK) )
+  ( (== A.r3 0) )
+  ( (= A.op J_MOVK)
+    (= A.r2 GAP)
+  )
+)
+
+;;;#  2
+( ( A(op == J_PUSHC+J_ALIGN4) )
+  ( (== A.r3 0) )
+  ( (kill A) )
+)
+
+;;;#  3
+; the resulting SHLK can be combined with later RR ops.
+( ( A(op == J_ADDR && peep & (P_SETCC+P_RSHIFT) == 0)
+  )
+  ( (== A.r2 A.r3) )
+  ( (= A.op J_SHLK)
+    (= A.r3 1)
+  )
+)
+
+;;;#  4
+( ( A(op == J_ADDK && peep & P_SETCC == 0)
+  )
+  ( (== A.r3 0)
+  )
+  ( (= A.op J_MOVR)
+    (= A.r3 A.r2)
+    (= A.r2 GAP)
+  )
+)
+
+;;;#  5
+;;; movr a, a => noop (remove junk from earlier peepholes - remove_noops()
+;;; in flowgraf.c filters such things from the input to localcg).
+( ( A(op == J_MOVR && peep == 0)
+  )
+  ( (== A.r1 A.r3)
+  )
+  ( (kill A)
+  )
+)
+
+;;;; Two peepholes to transform sign extend + comparison against constant =>
+;;;; shift up + comparison
+;;;; against shifted constant. These must precede the peephole which takes
+;;;; SHRK + CMPK #0 to SHRK+P_CMPZ, or they won't be used when the comparison
+;;;; is against 0.
+;;;#  6
+( ( A(op == J_SHLK)
+    B(op == J_SHRK+J_SIGNED)
+    C(op & ~Q_MASK == J_CMPK && dead_r2)
+  )
+  ( (== A.r3 B.r3)
+    (== A.r1 B.r2)
+    (== B.r1 B.r2)
+    (== C.r2 B.r1)
+    (>= C.r3 0) (<= C.r3 (- (bit (- 31 A.r3)) 1))
+    (nointervening G_ANY)
+  )
+  ( (kill B)
+    (= C.r3 (<< C.r3 A.r3))
+  )
+)
+
+;;;#  7
+( ( A(op == J_SHLK)
+    B(op == J_SHRK+J_SIGNED)
+    C(op & ~Q_MASK == J_CMPK && dead_r2)
+  )
+  ( (== A.r3 B.r3)
+    (== A.r1 B.r2)
+    (== B.r1 B.r2)
+    (== C.r2 B.r1)
+    (< C.r3 0) (>= C.r3 (- 0 (bit (- 31 A.r3))))
+    (nointervening G_ANY)
+  )
+  ( (kill B)
+    (= C.r3 (<< C.r3 A.r3))
+  )
+)
+
+;;;#  8
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r1 &! loads_r1 || op & ~(J_SIGNED+J_UNSIGNED+J_ALIGN4) <- (J_MOVC J_CLRC J_PUSHC
+                                    J_CALLR J_MULR J_MLAR J_MULL J_MLAL))
+        ; NOTE this means: uses_r2 && !X && !Y
+  )
+  ( (== A.r1 B.r1)
+  )
+  ( (= B.r1 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  9
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r2 &! loads_r2 || op & ~(J_SIGNED+J_UNSIGNED+J_ALIGN4) <- (J_MOVC J_CLRC J_PUSHC
+                                    J_CALLR J_MULR J_MLAR J_MULL J_MLAL))
+        ; NOTE this means: uses_r2 && !X && !Y
+  )
+  ( (== A.r1 B.r2)
+  )
+  ( (= B.r2 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  10
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r3 &! op & ~(J_SIGNED+J_UNSIGNED+J_ALIGN4) <- (J_MOVC J_CLRC J_PUSHC
+                        J_CALLR J_MULR J_MLAR J_MULL J_MLAL))
+  )
+  ( (== A.r1 B.r3) )
+  ( (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  11
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r4 &! op & ~(J_SIGNED+J_UNSIGNED+J_ALIGN4) <- (J_MOVC J_CLRC J_PUSHC
+                        J_CALLR J_MULL J_MLAL))         ; MLA OK here
+  )
+  ( (== A.r1 B.r4) )
+  ( (= B.r4 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  12
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r1 &! loads_r1 || op & ~(J_SIGNED+J_UNSIGNED+J_ALIGN4) <- (J_MOVC J_CLRC J_PUSHC
+                             J_CALLR J_MULR J_MLAR J_MULL J_MLAL))
+        ; NOTE this means: uses_r1 && !X && !Y
+  )
+  ( (== A.r1 B.r1) )
+  ( (= B.r1 A.r3) )
+)
+
+;;;#  13
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r2 &! loads_r2 || op & ~(J_SIGNED+J_UNSIGNED+J_ALIGN4) <- (J_MOVC J_CLRC J_PUSHC
+                             J_CALLR J_MULR J_MLAR J_MULL+J_SIGNED J_MULL J_MLAL))
+        ; NOTE this means: uses_r2 && !X && !Y
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r2 A.r3) )
+)
+
+;;;#  14
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r3 &! op & ~(J_SIGNED+J_UNSIGNED+J_ALIGN4) <- (J_MOVC J_CLRC J_PUSHC
+                 J_CALLR J_MULR J_MLAR J_MULL+J_SIGNED J_MULL J_MLAL))
+  )
+  ( (== A.r1 B.r3) )
+  ( (= B.r3 A.r3) )
+)
+
+;;;#  15
+( ( A(op == J_MOVR && peep & P_CMPZ == 0)
+    B(uses_r4 &! op & ~(J_SIGNED+J_UNSIGNED+J_ALIGN4) <- (J_MOVC J_CLRC J_PUSHC
+                 J_CALLR J_MULL+J_SIGNED J_MULL J_MLAL))                ; MLA OK here
+  )
+  ( (== A.r1 B.r4) )
+  ( (= B.r4 A.r3) )
+)
+
+;;;#  16
+( ( A(op == J_MOVR)
+    B(op <- (J_MOVC+J_ALIGN4 J_PUSHC+J_ALIGN4) && dead_r2)
+  )
+  ( (== A.r1 B.r2)
+        (|| (== A.dead_r3 1)
+            (movc_pres_r1r2 B A.dead_r3)        ; A.dead_r3 as B.r2 = A.r3 is done later
+                )
+  )
+  ( (= B.r2 A.r3)
+    (= B.r4 (| B.r4 (bit A.r1)))
+    (kill A)
+  )
+)
+
+;;;#  17
+( ( A(op == J_MOVR)
+    B(op <- (J_MOVC+J_ALIGN4 J_CLRC+J_ALIGN4) && dead_r1)
+  )
+  ( (== A.r1 B.r1)
+        (|| (== A.dead_r3 1)
+            (movc_pres_r1r2 B B.dead_r2)
+        )
+  )
+  ( (= B.r1 A.r3)
+    (= B.r4 (| B.r4 (bit A.r1)))
+    (kill A)
+  )
+)
+
+;;;#  18
+; I suppose the peep & (P_PRE+P_POST+P_CMPZ) == 0 is just an over-explicit way
+; of saying 'has no side effects'.
+; WD: made if safe by only allowing common cases
+( ( A(op <- (J_MOVK J_MOVR J_ADDK J_ADDR J_SUBR) && peep & (P_PRE+P_POST+P_CMPZ) == 0)
+    B(loads_r1 &! uses_r1)
+  )
+  ( (== A.r1 B.r1)
+    (regset_unused (bit B.r1))
+    (regset_unkilled (bit B.r1))
+    (notcall B)
+  )
+  ( (kill A) )
+)
+
+;;;#  19
+( ( A(op <- (J_MULR J_MLAR))
+    B(op == J_MOVR && peep & P_CMPZ == 0)
+  )
+  ( (== A.r1 B.r3)
+    (!= B.r1 A.r3)
+    (regset_unused (bit B.r1))
+  )
+  ( (= A.r1 B.r1)
+    (kill B)
+  )
+)
+
+;;;#  20
+( ( A(op <- (J_MULR J_MLAR))
+    B(op == J_MOVR && peep & P_CMPZ == 0)
+  )
+  ( (== A.r1 B.r3)
+    (== B.r1 A.r3)
+    (!= B.r1 A.r2)
+    (regset_unused (bit B.r1))
+  )
+  ( (swapr2r3 A)
+    (= A.r1 B.r1)
+    (kill B)
+  )
+)
+
+;;;#  21
+( ( A(loads_r1 &! op <- (J_MULR J_MLAR J_LDMW))
+    B(op == J_MOVR && peep & P_CMPZ == 0)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unused (bit B.r1))
+  )
+  ( (kill B)
+    (= A.r1 B.r1)
+  )
+)
+
+;;;#  22
+( ( A(op == J_MULR && peep == 0)
+    B(op == J_ADDR && peep & (P_RSHIFT + P_SETCC) == 0)
+  )
+  ( (== A.r1 B.r3)
+    (!= B.r1 A.r3)
+  )
+  ( (kill A)
+    (= B.op J_MLAR)
+    (= B.r2 A.r2)
+    (= B.r3 A.r3)
+    (= B.r4 B.r2)
+  )
+)
+
+;;;#  23
+( ( A(op == J_MULR && peep == 0)
+    B(op == J_ADDR && peep & (P_RSHIFT + P_SETCC) == 0)
+  )
+  ( (== A.r1 B.r3)
+    (== B.r1 A.r3)
+    (!= B.r1 A.r2)
+  )
+  ( (kill A)
+    (= B.op J_MLAR)
+    (= B.r2 A.r3)
+    (= B.r3 A.r2)
+    (= B.r4 B.r2)
+  )
+)
+
+;;;#  24
+( ( A(op == J_MULR && peep == 0)
+    B(op == J_ADDR && peep & (P_RSHIFT + P_SETCC) == 0)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r1 A.r3)
+  )
+  ( (kill A)
+    (= B.op J_MLAR)
+    (= B.r2 A.r2)
+    (= B.r3 A.r3)
+    (= B.r4 B.r3)
+  )
+)
+
+;;;#  25
+( ( A(op == J_MULR && peep == 0)
+    B(op == J_ADDR && peep & (P_RSHIFT + P_SETCC) == 0)
+  )
+  ( (== A.r1 B.r2)
+    (== B.r1 A.r3)
+    (!= B.r1 A.r2)
+  )
+  ( (kill A)
+    (= B.op J_MLAR)
+    (= B.r2 A.r3)
+    (= B.r3 A.r2)
+    (= B.r4 B.r3)
+  )
+)
+
+;;;#  26
+( ( A(op == J_ADDK)
+    B(op == J_B)
+  )
+  ( (== A.r1 R_SP)
+    (== A.r2 R_SP)
+    (== B.r3 RETLABV)
+    (regset_unused M_SP)
+    (notleafproc)
+  )
+  ( (kill A) )
+)
+
+;;;#  27
+( ( A(op == J_ADDK)
+    B(op <- (J_TAILCALLK J_TAILCALLR))
+  )
+  ( (== A.r1 R_SP)
+    (== A.r2 R_SP)
+    (regset_unused M_SP)
+    (notleafproc)
+  )
+  ( (kill A) )
+)
+
+;;;#  30
+( ( A(op & J_TABLE_BITS == J_NOTR && peep == 0)
+    B(op == J_ANDR && peep & P_RSHIFT == 0)
+  )
+  ( (== A.r1 B.r3) )
+  ( (kill A)
+    (= B.r3 A.r3)
+    (= B.op (+ A.op J_BICR-J_NOTR))
+  )
+)
+
+;;;#  31
+( ( A(op == J_NOTR && peep & ~P_RSHIFT == 0 &! peep == 0)
+    B(op == J_ANDR && peep & (P_RSHIFT + P_SETCC) == 0)     ; P_SETCC as B will get a shifted opnd
+  )                                                         ; and thus the carry is different
+  ( (regset_unkilled (bit A.r4))
+    (== A.r1 B.r3) )
+  ( (kill A)
+    (= B.r4 A.r4)
+    (= B.peep (| B.peep (& A.peep P_RSHIFT)))
+    (= B.r3 A.r3)
+    (= B.op J_BICR)
+  )
+)
+
+;;;#  32
+( ( A(op & J_TABLE_BITS == J_NOTR && peep == 0)
+    B(op == J_ANDR && peep & P_RSHIFT == 0)
+  )
+  ( (== A.r1 B.r2) )
+  ( (kill A)
+    (swapr2r3 B)
+    (= B.r3 A.r3)
+    (= B.op (+ A.op J_BICR-J_NOTR))
+  )
+)
+
+;;;#  33
+( ( A(op == J_NOTR && peep & ~P_RSHIFT == 0 &! peep == 0)
+    B(op == J_ANDR && peep & (P_RSHIFT + P_SETCC) == 0)    ; P_SETCC as B will get a shifted opnd
+  )                                                        ; and thus the carry is different
+  ( (regset_unkilled (bit A.r4))
+    (regset_unused M_PSR)    ; flags not used or altered inbetween
+    (== A.r1 B.r2) )
+  ( (kill A)
+    (swapr2r3 B)
+    (= B.r4 A.r4)
+    (= B.peep (| B.peep (& A.peep P_RSHIFT)))
+    (= B.r3 A.r3)
+    (= B.op J_BICR)
+  )
+)
+
+;;;#  34
+( ( A(op == J_MOVR && peep == 0)
+    B(op <- (J_CMPK+Q_EQ J_CMPK+Q_NE J_CMPK+Q_UEQ J_CMPK+Q_UNE))
+  )
+  ( (== B.r2 A.r3)
+    (== B.r3 0)
+    (regset_unkilled M_PSR)
+    (regset_unused M_PSR)    ; flags not used or altered inbetween
+  )
+  ( (kill B)
+    (= A.peep (| (| A.peep P_CMPZ) (& B.op Q_MASK)))
+  )
+)
+
+;;;#  35
+( ( A(op & ~(J_SHIFTMASK+J_SIGNED+J_UNSIGNED) <-
+            (       J_MOVR
+                    J_NEGR
+                    J_NOTR
+             J_ADDK J_ADDR
+             J_SUBK J_SUBR
+             J_RSBK J_RSBR
+             J_ANDK J_ANDR
+                    J_BICR
+             J_ORRK J_ORRR
+             J_EORK J_EORR
+             J_SHLR J_SHLK
+             J_SHRR J_SHRK
+             J_RORR J_RORK
+             J_ADCR J_ADCK
+             J_SBCR J_SBCK
+             J_RSCR J_RSCK
+             J_MULR J_MULK
+             J_MLAR) &&
+
+      peep & ~P_RSHIFT == 0)
+
+    B(op <- (J_CMPK+Q_EQ J_CMPK+Q_NE J_CMPK+Q_UEQ J_CMPK+Q_UNE) &&
+      dead_r2)
+  )
+  ( (regset_unkilled M_PSR)
+    (regset_unused M_PSR)    ; flags not used or altered inbetween
+    (regset_unused (bit A.r1))
+    (== B.r2 A.r1)
+    (== B.r3 0)
+  )
+  ( (kill B)
+    (= A.dead_r1 1)
+    (= A.peep (| (| A.peep P_CMPZ) (& B.op Q_MASK)))
+  )
+)
+
+;;;#  36
+( ( A(op & ~(J_SHIFTMASK+J_SIGNED+J_UNSIGNED) <-
+            (       J_MOVR
+                    J_NEGR
+                    J_NOTR
+             J_ADDK J_ADDR
+             J_SUBK J_SUBR
+             J_RSBK J_RSBR
+             J_ANDK J_ANDR
+                    J_BICR
+             J_ORRK J_ORRR
+             J_EORK J_EORR
+             J_SHLR J_SHLK
+             J_SHRR J_SHRK
+             J_RORR J_RORK
+             J_ADCR J_ADCK
+             J_SBCR J_SBCK
+             J_RSCR J_RSCK
+             J_MULR J_MULK
+             J_MLAR) &&
+
+
+      peep & ~P_RSHIFT == 0)
+
+    B(op <- (J_CMPK+Q_EQ J_CMPK+Q_NE J_CMPK+Q_UEQ J_CMPK+Q_UNE))
+  )
+  ( (regset_unkilled M_PSR)
+    (regset_unused M_PSR)    ; flags not used or altered inbetween
+    (== B.r2 A.r1)
+    (== B.r3 0)
+  )
+  ( (kill B)
+    (= A.peep (| (| A.peep P_CMPZ) (& B.op Q_MASK)))
+  )
+)
+
+;;; ORRK a, b, c; ANDK d, a, e => ANDK a, b, e; ORRK d, a, c&e.
+;;;   This is chiefly to give the ANDK + ANDK and ORRK + ORRK
+;;;   peepholes a better chance.
+;;;#  37
+( ( A(op == J_ORRK && peep == 0)
+    B(op == J_ANDK && dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (regset_unused (bit A.r1))
+    (regset_unkilled (bit B.r2))
+  )
+  ( (= A.r3 B.r3)          ;) in parallel
+    (= B.r3 (& A.r3 B.r3)) ;)
+    (= A.op J_ANDK)
+    (= B.op J_ORRK)
+  )
+)
+
+;;;#  38
+( ( A(op == J_ANDK && peep == 0)
+    B(op == J_ORRK)
+  )
+  ( (== A.r1 B.r2)
+    (==  (| A.r3 B.r3) -1)
+  )
+  ( (= B.r2 A.r2)
+    (kill A)
+  )
+)
+
+;;;#  39
+( ( A(op == J_ANDK && peep == 0)
+    B(op == J_ANDK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r2 A.r2)
+    (= B.r3 (& A.r3 B.r3))
+    (kill A)
+  )
+)
+
+;;;#  40
+( ( A(op == J_ORRK && peep == 0)
+    B(op == J_ORRK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r2 A.r2)
+    (= B.r3 (| A.r3 B.r3))
+    (kill A)
+  )
+)
+
+;;;#  41
+( ( A(op == J_EORK && peep == 0)
+    B(op == J_EORK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r2 A.r2)
+    (= B.r3 (^ A.r3 B.r3))
+    (kill A)
+  )
+)
+
+;;;#  42
+( ( A(op == J_ADDK && peep == 0)
+    B(op == J_ADDK && peep & P_SETCC == 0)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r2 A.r2)
+    (= B.r3 (+ A.r3 B.r3))
+    (kill A)
+  )
+)
+
+;;;; At the moment we've lost deadr2(B) & unused(A.r1) => kill A from this set.
+;;;#  43
+( ( A(op == J_MOVK)
+    B(op == J_ANDK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r3 (& A.r3 B.r3))
+    (= B.r2 GAP)
+    (= B.op J_MOVK)
+  )
+)
+
+;;;#  44
+( ( A(op == J_MOVK)
+    B(op == J_ORRK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r3 (| A.r3 B.r3))
+    (= B.r2 GAP)
+    (= B.op J_MOVK)
+  )
+)
+
+;;;#  45
+( ( A(op == J_MOVK)
+    B(op == J_EORK)
+  )
+  ( (== A.r1 B.r2) )
+  ( (= B.r3 (^ A.r3 B.r3))
+    (= B.r2 GAP)
+    (= B.op J_MOVK)
+  )
+)
+
+;;;#  46
+( ( A(op == J_MOVK)
+    B(op == J_ADDK && peep & P_SETCC == 0)
+  )
+  ( (== A.r1 B.r2)
+    (|| (! (difficult_constant (+ A.r3 B.r3)))
+        (! (difficult_constant (^ 0xffffffffl (+ A.r3 B.r3)))))
+  )
+  ( (= A.r1 B.r2)       ; copy deadflags
+    (= B.r3 (+ A.r3 B.r3))
+    (= B.r2 GAP)
+    (= B.op J_MOVK)
+  )
+)
+
+;;;#  47
+( ( A(op == J_MOVK && peep == 0)
+    B(op == J_SUBR && peep & P_SETCC == 0)
+  )
+  ( (== A.r1 B.r2) )
+  ( (kill A)
+    (= B.op J_RSBK)
+    (swapr2r3 B)
+    (= B.r3 A.r3)
+  )
+)
+
+;;; This fixes up shortcomings in dead-code elimination, whereby dead compares
+;;; get left.
+;;;#  48
+( ( A(op & ~Q_MASK <- (J_CMPK J_CMPR J_CMPFK J_CMPFR J_CMPDK J_CMPDR))
+    B(op & ~Q_MASK <- (J_CMPK J_CMPR J_CMPFK J_CMPFR J_CMPDK J_CMPDR))
+  )
+  ( (regset_unkilled M_PSR)
+    (regset_unused M_PSR)    ; flags not used or altered inbetween
+  )
+  ( (kill A) )
+)
+
+;;; This clears up the mess left by STRW of a (large) constant
+;;;#  49
+( ( A(op == J_MOVK)
+    B(op == J_STRBK+J_ALIGN1 && dead_r1)
+  )
+  ( (== A.r1 B.r1)
+    (>u A.r3 255)
+    (regset_unused (bit B.r1))
+  )
+  ( (= A.r3 (& A.r3 255))  )
+)
+
+;;;#  50
+( ( A(op == J_MOVIDR)
+    B(op == J_PUSHD && dead_r1)
+  )
+  ( (== A.r1 B.r1)
+    (regset_unkilled (bit A.r2))
+    (regset_unkilled (bit A.r3))
+   )
+  ( (= B.op J_PUSHM)
+    (= B.r3 (| (bit A.r2) (bit A.r3)))
+    (kill A)
+  )
+
+)
+
+;;;#  51
+;;; ADDK x,12,#n is how ADCONV x, <something> arrives at gen
+;;; (and ADDK x,12,#0 has been turned into MOVR x,-,12 earlier)
+( ( A(op == J_MOVR && peep == 0)
+    B(op & ~(J_SIGNED+J_UNSIGNED+J_NEGINDEX+J_SHIFTMASK+J_ALIGNMENT) <-
+              (J_LDRFR J_LDRDR J_STRFR J_STRDR
+               J_LDRBR J_LDRWR J_LDRR J_STRBR J_STRR)) ; STRWR case avoided on arm
+  )
+  (
+    (== A.r1 B.r2)
+  )
+  ( (= B.r2 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  52
+( ( A(op == J_ADDK && peep == 0)
+    B(op <- (J_LDRFK+J_ALIGN4 J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8
+             J_STRFK+J_ALIGN4 J_STRDK+J_ALIGN4 J_STRDK+J_ALIGN8))
+  )
+  ( (== A.r1 A.r2)
+    (!= A.r1 R_SP)
+    (== B.r3 0)
+    (offsetinrange A.r3 B.op)
+    (== B.r2 A.r1)
+  )
+  ( (= B.peep (| B.peep P_PRE))
+    (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  53
+( ( A(op == J_ADDK && peep == 0)
+    B(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRWK+J_ALIGN2 J_STRWK+J_ALIGN2
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4))
+  )
+  ( (== A.r1 A.r2)
+    (!= A.r1 R_SP)
+    (== B.r3 0)
+    (offsetinrange A.r3 B.op)
+    (== B.r2 A.r1)
+    (!= B.r1 B.r2)
+  )
+  ( (= B.peep (| B.peep P_PRE))
+    (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  54
+( ( A(op == J_ADDK && peep == 0)
+    B(op & ~(J_SIGNED+J_UNSIGNED+J_ALIGNMENT) <- (J_LDRBK J_LDRWK J_LDRK J_STRBK J_STRWK J_STRK) && dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (offsetinrange (+ B.r3 A.r3) B.op)
+  )
+  ( (kill A)
+    (= B.r2 A.r2) (= B.r3 (+ A.r3 B.r3))
+  )
+)
+
+;;;#  55
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRWK+J_ALIGN2 J_STRWK+J_ALIGN2
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4)
+      && peep & P_PRE+P_POST+P_MS == 0)
+    B(op == J_ADDK && peep == 0)
+  )
+  ( (== A.r3 0)
+    (!= A.r2 R_SP)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (!= B.r1 A.r1)
+    (offsetinrange B.r3 A.op)
+    (regset_unused (bit A.r2))
+  )
+  ( (kill B)
+    (= A.r3 B.r3)
+    (= A.peep (| A.peep P_POST))
+  )
+)
+
+;;;#  56
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRWK+J_ALIGN2 J_STRWK+J_ALIGN2
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4)
+      &! peep & P_POST == 0)
+    B(op == J_ADDK && peep == 0)
+  )
+  ( (== B.r1 A.r2)
+    (!= A.r2 R_SP)
+    (== B.r1 B.r2)
+    (!= B.r1 A.r1)
+    (offsetinrange (+ A.r3 B.r3) A.op)
+    (regset_unused (bit A.r2))
+  )
+  ( (kill B)
+    (= A.r3 (+ A.r3 B.r3))
+  )
+)
+
+;;;#  57
+( ( A(op <- (J_LDRFK+J_ALIGN4 J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8
+             J_STRFK+J_ALIGN4 J_STRDK+J_ALIGN4 J_STRDK+J_ALIGN8)
+      && peep == 0)
+    B(op == J_ADDK && peep == 0)
+  )
+  ( (== A.r3 0)
+    (!= A.r2 R_SP)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (offsetinrange B.r3 A.op)
+    (regset_unused (bit A.r2))
+  )
+  ( (kill B)
+    (= A.r3 B.r3)
+    (= A.peep P_POST)
+  )
+)
+
+;;;#  58
+( ( A(op <- (J_LDRFK+J_ALIGN4 J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8
+             J_STRFK+J_ALIGN4 J_STRDK+J_ALIGN4 J_STRDK+J_ALIGN8)
+      && peep == P_POST)
+    B(op == J_ADDK && peep == 0)
+  )
+  ( (== B.r1 A.r2)
+    (!= A.r2 R_SP)
+    (== B.r1 B.r2)
+    (offsetinrange (+ A.r3 B.r3) A.op)
+    (regset_unused (bit A.r2))
+  )
+  ( (kill B)
+    (= A.r3 (+ A.r3 B.r3))
+  )
+)
+
+;;;#  59
+( ( A(op & ~(J_SIGNED+J_UNSIGNED+J_NEGINDEX+J_ALIGNMENT) <- (J_LDRBK J_LDRBR))
+    B(op == J_ANDK && peep == 0)
+  )
+  ( (== B.r3 255)
+    (== A.r1 B.r2)
+    (== B.r1 B.r2)
+  )
+  ( (kill B) )
+)
+
+;;;#  60
+( ( A(op == J_MOVR && peep == 0)
+    X()
+    B(op == J_MOVC+J_ALIGN4 && dead_r1)
+  )
+  ( (== A.r3 R_SP)
+    (== B.r1 A.r1)
+    (nostackrefsbelow A B.r3)
+  )
+  ( (= A.op J_ADDK)
+    (= A.r1 R_SP)
+    (= A.r2 R_SP)
+    (= A.r3 B.r3)
+    (= A.dead_r2 1)
+    (= X.op J_ADDK)
+    (= X.r1 B.r2)
+    (= X.r2 B.r2)
+    (= X.r3 B.r3)
+    (= X.dataflow J_DEAD_R2)
+    (= X.r4 0)
+    (= B.op J_PUSHC+J_ALIGN4)
+    (= B.r1 A.r3)
+    (adjuststackrefs A B.r3)
+        (= B.r4 (| B.r4 (bit B.r1)))
+  )
+)
+
+;;;#  61
+( ( A(op == J_MOVC+J_ALIGN4 && peep & P_POST == 0)
+    B(op == J_ADDK && peep == 0)
+  )
+  ( (== A.r2 B.r2)
+    (== B.r1 B.r2)
+    (== A.r3 B.r3)
+   ; (!= A.r2 R_SP)
+    (regset_unused (bit A.r2))
+  )
+  ( (kill B)
+    (= A.peep (| A.peep P_POST))
+  )
+)
+
+;;;; Two peepholes to improve handling of loading fp arguments into
+;;;; integer registers.
+;;;#  62
+( ( A(op <- (J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8) && peep & P_POST == 0)
+    B(op == J_MOVDIR && dead_r3)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unused (bit B.r1)) (regset_unused (bit B.r2))
+    (regset_unused (bit A.r1))
+  )
+  ( (= A.op J_POPMB)
+    (= A.r1 (+ A.r3 8))
+    (= A.r3 (| (bit B.r1) (bit B.r2)))
+    (kill B)
+  )
+)
+
+;;;#  63
+( ( A(op == J_MOVDK)
+    B(op == J_MOVDIR && dead_r3)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unused (bit B.r1)) (regset_unused (bit B.r2))
+    (regset_unused (bit A.r1))
+  )
+  ( (= A.op J_ADCOND)
+    (= A.r1 B.r1)
+    (= B.op J_POPMB)
+    (= B.r2 B.r1)
+    (= B.r1 8)
+    (= B.r3 (| (bit B.r1) (bit B.r2)))
+  )
+)
+
+;;;; 4 peepholes to do shift by register + arithlogical op => noop + scaled op
+;;;; One peephole handles the shifted operand being the second operand of op,
+;;;; three the first operand (non-symmetric ops need to turn into their reverse).
+;;;#  64
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLR J_SHRR J_RORR) &&
+      peep == 0)
+    B(op & ~Q_MASK <- (J_ADDR J_ADCR J_SUBR J_SBCR J_RSBR J_RSCR J_ANDR J_ORRR J_EORR J_CMPR) &&
+      peep & (P_RSHIFT + P_SETCC) == 0)
+    ; the mask is required for J_CMPR, but harmless for the other cases.
+  )
+  ( (== A.r1 B.r3)
+    (!= B.r2 B.r3)
+    (regset_unkilled (bit A.r3))
+  )
+  ( (kill A)
+    (= B.peep (| B.peep (shift_p A.op)))
+    (= B.r4 A.r3)
+    (= B.r3 A.r2)
+  )
+)
+
+;;;#  65
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLR J_SHRR J_RORR) &&
+      peep == 0)
+    B(op <- (J_ADDR J_ADCR J_ANDR J_ORRR J_EORR J_CMPR+Q_EQ J_CMPR+Q_NE) &&
+      peep & (P_RSHIFT + P_SETCC) == 0)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (regset_unkilled (bit A.r3))
+  )
+  ( (kill A)
+    (swapr2r3 B)
+    (= B.peep (| B.peep (shift_p A.op)))
+    (= B.r4 A.r3)
+    (= B.r3 A.r2)
+  )
+)
+
+;;;#  66
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLR J_SHRR J_RORR) &&
+      peep == 0)
+    B(op <- (J_SUBR J_SBCR J_RSBR J_RSCR) &&
+      peep & (P_RSHIFT + P_SETCC) == 0)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (regset_unkilled (bit A.r3))
+  )
+  ( (kill A)
+    (swapr2r3 B)
+    (= B.peep (| B.peep (shift_p A.op)))
+    (= B.op (^ B.op J_SUBR^J_RSBR))
+    (= B.r4 A.r3)
+    (= B.r3 A.r2)
+  )
+)
+
+;;;#  67
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLR J_SHRR J_RORR) &&
+      peep == 0)
+    B(op <- (J_CMPR+Q_LT J_CMPR+Q_GE J_CMPR+Q_LE J_CMPR+Q_GT
+             J_CMPR+Q_LO J_CMPR+Q_HS J_CMPR+Q_LS J_CMPR+Q_HI) &&
+      peep & P_RSHIFT == 0)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (regset_unkilled (bit A.r3))
+  )
+  ( (kill A)
+    (swapr2r3 B)
+    (= B.peep (| (| B.peep (shift_p A.op)) P_SWAPCOND))
+    (= B.r4 A.r3)
+    (= B.r3 A.r2)
+    (= B.op (q_swap B.op))
+  )
+)
+
+;;;; 4 peepholes to do shift by constant + arithlogical op => noop + scaled op
+;;;; (TARGET_HAS_SCALED... means that often this will already have been
+;;;;  done in cg, but this sweeps up cases where the constant shift was
+;;;;  invented later).
+;;;; One peephole handles the shifted operand being the second operand of op,
+;;;; three the first operand (non-symmetric ops need to turn into their reverse).
+;;;#  68
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLK J_SHRK J_RORK) &&
+      peep == 0)
+    B(op & ~Q_MASK <- (J_ADDR J_ADCR J_SUBR J_SBCR J_RSBR J_RSCR J_ANDR J_ORRR J_EORR J_CMPR) &&
+      peep & (P_RSHIFT + P_SETCC) == 0)
+   ; The mask is required for J_CMPR, but harmless for the other cases.
+  )
+  ( (== A.r1 B.r3)
+    (!= B.r2 B.r3)
+  )
+  ( (kill A)
+    (= B.op (| B.op (shift_k A.op A.r3)))
+    (= B.r3 A.r2)
+  )
+)
+
+;;;#  69
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLK J_SHRK J_RORK) &&
+      peep == 0)
+    B(op <- (J_ADDR J_ADCR J_ANDR J_ORRR J_EORR J_CMPR+Q_EQ J_CMPR+Q_NE) &&
+      peep & (P_RSHIFT + P_SETCC) == 0)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+  )
+  ( (kill A)
+    (swapr2r3 B)
+    (= B.op (| B.op (shift_k A.op A.r3)))
+    (= B.r3 A.r2)
+  )
+)
+
+;;;#  70
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLK J_SHRK J_RORK) &&
+      peep == 0)
+    B(op <- (J_SUBR J_SBCR J_RSBR J_RSCR) &&
+      peep & (P_RSHIFT + P_SETCC) == 0)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+  )
+  ( (kill A)
+    (swapr2r3 B)
+    (= B.op (| (^ B.op J_SUBR^J_RSBR) (shift_k A.op A.r3)))
+    (= B.r3 A.r2)
+  )
+)
+
+;;;#  71
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLK J_SHRK J_RORK) &&
+      peep == 0)
+    B(op <- (J_CMPR+Q_LT J_CMPR+Q_GE J_CMPR+Q_LE J_CMPR+Q_GT
+             J_CMPR+Q_LO J_CMPR+Q_HS J_CMPR+Q_LS J_CMPR+Q_HI) &&
+      peep & P_RSHIFT == 0)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+  )
+  ( (kill A)
+    (swapr2r3 B)
+    (= B.op (q_swap (| B.op (shift_k A.op A.r3))))
+    (= B.r3 A.r2)
+    (= B.peep (| B.peep P_SWAPCOND))
+  )
+)
+
+;;;; the next two are different because the constraints implied
+;;;; by the replacements are different.
+;;;#  72
+( ( A(op & ~J_BASEALIGN4 <- (J_ADCON J_STRING))
+    B(op == J_ADDK && dead_r2 && peep == 0)
+  )
+  ( (== A.r1 B.r2)
+    (regset_unused (bit B.r1))
+  )
+  ( (= A.r1 B.r1)
+    (= A.r2 (+ A.r2 B.r3))
+    (kill B)
+  )
+)
+
+;;;#  73
+( ( A(op & ~J_BASEALIGN4 <- (J_ADCON J_STRING))
+    B(op == J_ADDK && dead_r2 && peep == 0)
+  )
+  ( (== A.r1 B.r2)
+  )
+  ( (kill A)
+    (= B.op A.op)
+    (= B.r2 (+ A.r2 B.r3))
+    (= B.r3 A.r3)
+  )
+)
+
+;;;; Peepholes to handle structure argument passing across the boundary between
+;;;; registers and stack, turning push followed by partial pop into partial
+;;;; push and direct load of the rest. No longer works since the demise of POPM.
+;;;;
+;( ( A(op == J_PUSHM)
+;    B(op == J_POPMX)
+;  )
+;  ( (==  (& A.r3 B.r3) A.r3)
+;    (regset_unkilled A.r3)
+;    (regset_unkilled M_SP)
+;    (> (lsb (^ B.r3 A.r3)) A.r3 )
+;    (nostackrefsbelow A (bitcount A.r3))
+;  )
+;  ( (adjuststackrefs A (bitcount A.r3))
+;    (kill A)
+;    (= B.r3 (^ B.r3 A.r3))
+;  )
+;)
+;
+;;;;
+;( ( A(op == J_MOVC+J_ALIGN4)
+;    B(op == J_POPMX)
+;  )
+;  ( )
+;  ( ( { bool changed = NO;
+;        IGNORE(ops);
+;        if ((ops[0]->m & regbit(R_A2)) && p_value_unused(u, R_A2)) { A->peep |= P_A2FREE; changed = NO; }
+;        if ((ops[0]->m & regbit(R_A3)) && p_value_unused(u, R_A3)) { A->peep |= P_A3FREE; changed = NO; }
+;        return changed;
+;      }
+;    A)
+;  )
+;)
+;
+;;;;
+;( ( A(op == J_PUSHC+J_ALIGN4)
+;    B(op == J_POPMX)
+;  )
+;  ( (regset_unkilled M_SP)
+;    (<= (bitcount B.r3) A.r3)
+;    (nostackrefsbelow A (bitcount B.r3))
+;    (regset_unused (bit A.r2))
+;  )
+;  ( (= A.r3 (- A.r3 (bitcount B.r3)))
+;    (= A.dataflow (& A.dataflow 0xffffffffl-J_DEAD_R2))
+;    (= B.op J_POPMB)
+;    (= B.r1 0)
+;    (= B.r2 A.r2)
+;    (adjuststackrefs A (bitcount B.r3))
+;    ( { bool changed = NO;
+;        IGNORE(ops);
+;        if ((ops[0]->m & regbit(R_A2)) && p_value_unused(u, R_A2)) { A->peep |= P_A2FREE; changed = NO; }
+;        if ((ops[0]->m & regbit(R_A3)) && p_value_unused(u, R_A3)) { A->peep |= P_A3FREE; changed = NO; }
+;        return changed;
+;      }
+;    A)
+;  )
+;)
+;
+;;;;
+;( ( A(op == J_PUSHC+J_ALIGN4)
+;    B(op == J_POPMX)
+;  )
+;  ( (regset_unkilled M_SP)
+;    (==  (bitcount B.r3) A.r3)
+;    (nostackrefsbelow A A.r3)
+;    (regset_unused (lsb B.r3))
+;  )
+;  ( (= A.op J_ADDK) (= A.r1 (log2 (lsb B.r3))) (= A.r3 0) (= A.peep 0)
+;    (= B.op J_POPMB)
+;    (= B.r1 0)
+;    (= B.r2 (log2 (lsb B.r3)))
+;    (adjuststackrefs A (bitcount B.r3))
+;  )
+;)
+
+;;;#  74
+;;; The explicit constraint unkilled A.r2 in the following two peepholes is
+;;; there because peepgen can't currently deduce it because it can't cope with
+;;; registers in the r4 field.  (But there's no need for a unkilled A.r3 in the
+;;; second peephole, because it can handle those).
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) == J_LDRK+J_ALIGN4 && peep == 0)
+    B(op == J_CALLR)
+  )
+  ( (!= A.r2 R_LR)
+    (== A.r1 B.r3)
+    (regset_unkilled (bit A.r2))
+    (! (pcs_flags PCS_INTERWORK))
+    (nointervening G_ANYSTR)
+  )
+  ( (= B.op J_CALLI)
+    (= B.r3 A.r3)
+    (= B.r4 A.r2)
+    (= B.peep A.peep)
+    (kill A)
+  )
+)
+
+;;;#  75
+( ( A(op & ~(J_SIGNED+J_UNSIGNED+J_NEGINDEX+J_SHIFTMASK) == J_LDRR+J_ALIGN4 && peep == 0)
+    B(op == J_CALLR)
+  )
+  ( (!= A.r2 R_LR) (!= A.r3 R_LR)
+    (== A.r1 B.r3)
+    (regset_unkilled (bit A.r2))
+    (! (pcs_flags PCS_INTERWORK))
+    (nointervening G_ANYSTR)
+  )
+  ( (= B.op (| J_CALLIR (& A.op J_SHIFTMASK+J_NEGINDEX)))
+    (= B.r3 A.r3)
+    (= B.r4 A.r2)
+    (= B.peep A.peep)
+    (kill A)
+  )
+)
+
+;;;#  76
+;;; Expansion of the TAILCALL jopcodes is prepared to find the destination
+;;; in a register expansion of the jopcode will destroy before its needed.
+;;; So no check in the next two peepholes for not R_LR.
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) == J_LDRK+J_ALIGN4 && peep == 0)
+    B(op == J_TAILCALLR)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unkilled (bit A.r2))
+    (! (pcs_flags PCS_INTERWORK))
+    (nointervening G_ANYSTR)
+  )
+  ( (= B.op J_TAILCALLI)
+    (= B.r3 A.r3)
+    (= B.r4 A.r2)
+    (= B.peep A.peep)
+    (kill A)
+  )
+)
+
+;;;#  77
+( ( A(op & ~(J_SIGNED+J_UNSIGNED+J_NEGINDEX+J_SHIFTMASK) == J_LDRR+J_ALIGN4 && peep == 0)
+    B(op == J_TAILCALLR)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unkilled (bit A.r2))
+    (! (pcs_flags PCS_INTERWORK))
+    (nointervening G_ANYSTR)
+  )
+  ( (= B.op (| J_TAILCALLIR (& A.op J_SHIFTMASK+J_NEGINDEX)))
+    (= B.r3 A.r3)
+    (= B.r4 A.r2)
+    (= B.peep A.peep)
+    (kill A)
+  )
+)
+
+;;; movr a,b then movr b,a => movr a,b + noop.
+;;; kills some unintelligent argument juggling, as in
+;;; f(a, b) { g(a, b); code using a & b }
+;;;#  78
+( ( A(op == J_MOVR)
+    B(op == J_MOVR && peep == 0)
+  )
+  ( (== A.r1 B.r3)
+    (== A.r3 B.r1)
+    (regset_unkilled (bit B.r1))
+    (regset_unkilled (bit B.r3))
+  )
+  ( (kill B)
+  )
+)
+
+;;; comparison of unsigned bitfield against 0
+;;;#  79
+( ( A(op == J_MOVK)
+    B(op & ~(J_SHIFTVAL+J_SHIFTA) == J_ANDR+J_SHIFTR && dead_r1 &&
+      peep & P_SETCC == 0 &! peep & P_CMPZ == 0)
+  )
+  ( (== A.r1 B.r2)
+  )
+  ( (kill A)
+    (= B.op J_ANDK)
+    (swapr2r3 B)
+    (= B.r3 (<< A.r3
+               (>> (& B.op J_SHIFTVAL)
+                   J_SHIFTPOS)))
+  )
+)
+
+;;; comparison of signed bitfield against 0
+;;;#  80
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) == J_SHLK && peep & P_CMPZ == 0)
+    B(op == J_MOVK)
+    C(op & ~J_SHIFTVAL <- (J_CMPR+J_SHIFTR+J_SHIFTA+Q_EQ J_CMPR+J_SHIFTR+J_SHIFTA+Q_NE))
+  )
+  ( (== B.r3 0)
+    (== C.r2 B.r1)
+    (== C.r3 A.r1)
+    (>= (>> (& C.op J_SHIFTVAL) J_SHIFTPOS) A.r3)
+  )
+  ( (kill A)
+    (kill B)
+    (= C.op J_ANDK) (= C.r1 C.r3) (= C.r2 C.r3)
+    (= C.r3 (<< (- (bit (- 32
+                          (>> (& C.op J_SHIFTVAL)
+                              J_SHIFTPOS)))
+                  1)
+               (- (>> (& C.op J_SHIFTVAL)
+                      J_SHIFTPOS)
+                  A.r3)))
+    (= C.peep (| P_CMPZ (& C.op Q_MASK)))
+  )
+)
+
+;;; store of one bitfield into another gives a redundant mask
+;;; (currently doesn't work too well, because the required (unkilled A.r1 (A B))
+;;; is widened (since the range isn't representable) to ( - - (A C))
+;;;#  81
+( ( A(op == J_MOVK)
+    B(op & ~J_SHIFTMASK == J_ANDR)
+    C(op == J_ANDK && peep & P_CMPZ == 0)
+  )
+  ( (== A.r1 B.r2)
+    (== C.r1 C.r2)
+    (== C.r2 B.r1)
+    (== (& A.r3 C.r3) A.r3)
+  )
+  ( (kill C)
+  )
+)
+
+; store of a signed bitfield into a field of the same width gives unnecessary sign-extension
+;;;#  82
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) == J_SHLK)
+    B(op == J_SHRK+J_SIGNED)
+    C(op == J_ANDK && dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (== B.r1 C.r2)
+    (<= A.r3 B.r3)
+    (== (+ C.r3 1) (bit (- 32 B.r3)))
+  )
+  ( (kill A)
+    (= B.r3 (- B.r3 A.r3))
+    (= B.r2 A.r2)
+  )
+)
+
+;;;#  83
+( ( A(op & ~(J_SHIFTMASK+J_SIGNED+J_UNSIGNED) <-
+            (       J_MOVR
+                    J_NEGR
+                    J_NOTR
+             J_ADDK J_ADDR
+             J_SUBK J_SUBR
+             J_RSBK J_RSBR
+             J_ANDK J_ANDR
+                    J_BICR
+             J_ORRK J_ORRR
+             J_EORK J_EORR
+             J_SHLR J_SHLK
+             J_SHRR J_SHRK
+             J_RORR J_RORK
+                         J_ADCK J_ADCR
+                         J_SBCK J_SBCR
+                         J_RSCK J_RSCR
+             J_MULR J_MULK
+             J_MLAR) &&
+
+      peep & ~P_RSHIFT == 0)
+
+    B(op <- (J_CMPK+Q_LT J_CMPK+Q_GE) && dead_r2)
+    C(op <- (J_B+Q_LT J_CONDEXEC+Q_LT J_B+Q_GE J_CONDEXEC+Q_GE))
+  )
+  ( (regset_unused (bit A.r1))
+    (== B.r2 A.r1)
+    (== B.r3 0)
+    (== A.cond Q_AL)
+  )
+  ( (kill B)
+    (= A.dead_r1 1)
+    (= A.peep (| (| A.peep P_CMPZ)
+                 (^ (& C.op Q_MASK) Q_MI^Q_LT)))
+    (= C.op (^ C.op Q_MI^Q_LT))                                         ; !!! This is very dangerous!!!
+  )
+)
+
+;;;#  84
+( ( A(op & ~(J_SHIFTMASK+J_SIGNED+J_UNSIGNED) <-
+            (       J_MOVR
+                    J_NEGR
+                    J_NOTR
+             J_ADDK J_ADDR
+             J_SUBK J_SUBR
+             J_RSBK J_RSBR
+             J_ANDK J_ANDR
+                    J_BICR
+             J_ORRK J_ORRR
+             J_EORK J_EORR
+             J_SHLR J_SHLK
+             J_SHRR J_SHRK
+             J_RORR J_RORK
+                         J_ADCK J_ADCR
+                         J_SBCK J_SBCR
+                         J_RSCK J_RSCR
+             J_MULR J_MULK
+             J_MLAR) &&
+
+      peep & ~P_RSHIFT == 0)
+
+    B(op <- (J_CMPK+Q_LT J_CMPK+Q_GE))
+    C(op <- (J_B+Q_LT J_CONDEXEC+Q_LT J_B+Q_GE J_CONDEXEC+Q_GE))
+  )
+  ( (== B.r2 A.r1)
+    (== B.r3 0)
+    (== A.cond Q_AL)
+  )
+  ( (kill B)
+    (= A.peep (| (| A.peep P_CMPZ)
+                 (^ (& C.op Q_MASK) Q_MI^Q_LT)))
+    (= C.op (^ C.op Q_MI^Q_LT))                                         ; !!! This is very dangerous!!!
+  )
+)
+
+;;; movk a, n + <op>k b,c,n => movk a, n + <op>r b, c, a
+;;;#  85
+( ( A(op == J_MOVK)
+    B(op <- (J_ADDK J_SUBK J_RSBK J_ANDK J_ORRK J_EORK) && peep & P_SETCC == 0)
+  )
+  ( (== A.r3 B.r3)
+    (regset_unkilled (bit A.r1))
+  )
+  (  (= B.op (+ B.op 1))    ; rk -> rr
+     (= B.r3 A.r1)
+  )
+)
+
+;;; in  store or load somewhere, then load from same place  replace second
+;;; load with MOVR.  I think the simple case (arising from spilled binders)
+;;; is all that needs doing: more complicated cases having already been
+;;; fixed up (CSE?).
+;;;#  86
+( ( A(op & ~J_ALIGNMENT <- (J_STRK J_LDRK) && peep & (P_PRE+P_POST) == 0)
+    B(op & ~J_ALIGNMENT == J_LDRK && peep & (P_PRE+P_POST) == 0)
+  )
+  ( (== A.r2 B.r2)
+    (== A.r3 B.r3)
+    (== B.r2 R_SP)
+    (nointervening G_POSSIBLEALIASSTR)
+  )
+  ( (= B.op J_MOVR) (= B.r2 GAP) (= B.r3 A.r1)
+  )
+)
+
+;;;#  87
+( ( A(op & ~J_ALIGNMENT <- (J_STRK J_LDRK) && peep & (P_PRE+P_POST) == P_PRE)
+    B(op & ~J_ALIGNMENT == J_LDRK && peep & (P_PRE+P_POST) == 0)
+  )
+  ( (== A.r2 B.r2)
+    (== B.r3 0)
+    (== B.r2 R_SP)
+    (nointervening G_POSSIBLEALIASSTR)
+  )
+  ( (= B.op J_MOVR) (= B.r2 GAP) (= B.r3 A.r1)
+  )
+)
+
+;( ( A(op == J_MOVK)
+;    B(op == J_MOVK)
+;  )
+;  ( (difficult_constant A.r3) (difficult_constant (^ A.r3 0xffffffff))
+;    (difficult_constant B.r3) (difficult_constant (^ B.r3 0xffffffff))
+;    (! (difficult_constant (- B.r3 A.r3)))
+;  )
+;  ( (= B.op J_ADDK) (= B.r2 A.r1) (= B.r3 (- B.r3 A.r3))
+;  )
+;)
+
+;;;; 3 peepholes to do mulk (k a multiple of 2^n, n>=1) + arithlogical op =>
+;;;; mulk by k/2^n + scaled op.
+;;;; (TARGET_HAS_SCALED... means that often this will already have been
+;;;;  done in cg, but this sweeps up cases where the constant shift was
+;;;;  invented later).
+;;;; One peephole handles the shifted operand being the second operand of op,
+;;;; three the first operand (non-symmetric ops need to turn into their reverse).
+;;;#  88
+( ( A(op == J_MULK && peep & P_SETCC == 0)
+    B(op & ~Q_MASK <- (J_ADDR J_ADCR J_SUBR J_SBCR J_RSBR J_RSCR J_ANDR J_BICR J_ORRR J_EORR J_CMPR) &&
+      peep & P_RSHIFT == 0 && dead_r3)
+    ; the mask is required for J_CMPR, but harmless for the other cases.
+  )
+  ( (== A.r1 B.r3)
+    (!= B.r2 B.r3)
+    (!= A.r3 0)
+    (!= (& A.r3 (- 0 A.r3)) 1)
+    (regset_unused (bit A.r1))
+  )
+  ( (= A.r3 (/ A.r3 (& A.r3 (- 0 A.r3))))
+    (= B.op (| B.op (shift_k J_SHLK (log2 (& A.r3 (- 0 A.r3))))))
+  )
+)
+
+;;;#  89
+( ( A(op == J_MULK && peep & P_SETCC == 0)
+    B(op <- (J_ADDR J_ADCR J_ANDR J_BICR J_ORRR J_EORR J_CMPR+Q_EQ J_CMPR+Q_NE) &&
+      peep & P_RSHIFT == 0 && dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (!= A.r3 0)
+    (!= (& A.r3 (- 0 A.r3)) 1)
+    (regset_unused (bit A.r1))
+  )
+  ( (= A.r3 (/ A.r3 (& A.r3 (- 0 A.r3))))
+    (swapr2r3 B)
+    (= B.op (| B.op (shift_k J_SHLK (log2 (& A.r3 (- 0 A.r3))))))
+  )
+)
+
+;;;#  90
+( ( A(op == J_MULK && peep & P_SETCC == 0)
+    B(op <- (J_SUBR J_SBCR J_RSBR J_RSCR) &&
+      peep & P_RSHIFT == 0 && dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (!= A.r3 0)
+    (!= (& A.r3 (- 0 A.r3)) 1)
+    (regset_unused (bit A.r1))
+  )
+  ( (swapr2r3 B)
+    (= A.r3 (/ A.r3 (& A.r3 (- 0 A.r3))))
+    (= B.op (| (^ B.op J_SUBR^J_RSBR) (shift_k J_SHLK (log2 (& A.r3 (- 0 A.r3))))))
+  )
+)
+
+;;;#  91
+( ( A(op == J_MULK && peep & P_SETCC == 0)
+    B(op <- (J_CMPR+Q_LT J_CMPR+Q_GE J_CMPR+Q_LE J_CMPR+Q_GT
+             J_CMPR+Q_LO J_CMPR+Q_HS J_CMPR+Q_LS J_CMPR+Q_HI) &&
+      peep & P_RSHIFT == 0 && dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (!= A.r3 0)
+    (!= (& A.r3 (- 0 A.r3)) 1)
+    (regset_unused (bit A.r1))
+  )
+  ( (= A.r3 (/ A.r3 (& A.r3 (- 0 A.r3))))
+    (swapr2r3 B)
+    (= B.op (q_swap (| B.op (shift_k J_SHLK (log2 (& A.r3 (- 0 A.r3)))))))
+    (= B.peep (| B.peep P_SWAPCOND))
+  )
+)
+
+;;;#  92
+( ( A(op == J_ADCON+J_BASEALIGN4)
+    B(op & ~(J_SIGNED+J_UNSIGNED+J_ALIGNMENT) == J_LDRWK &&
+      peep & P_BASEALIGNED == 0)
+  )
+  ( (== A.r1 B.r2)
+    (== (& A.r2 3) 0)
+  )
+  ( (= B.peep (| B.peep P_BASEALIGNED)) )
+)
+
+;;;#  93
+( ( A(op == J_ADCON+J_BASEALIGN4)
+    B(op & ~J_ALIGNMENT == J_LDRBK+J_SIGNED &&
+      peep & P_BASEALIGNED == 0)
+  )
+  ( (== A.r1 B.r2)
+    (== (& A.r2 3) 0)
+  )
+  ( (= B.peep (| B.peep P_BASEALIGNED)) )
+)
+
+;;;#  94
+( ( A(op & ~(J_SIGNED+J_UNSIGNED+J_ALIGNMENT) == J_LDRWK &&
+      peep & P_BASEALIGNED == 0)
+  )
+  ( (! (pcs_flags PCS_NOFP))
+    (|| (== A.r2 R_SP)
+        (== A.r2 R_FP)
+    )
+  )
+  ( (= A.peep (| A.peep P_BASEALIGNED)) )
+)
+
+;;;#  95
+( ( A(op & ~J_ALIGNMENT == J_LDRBK+J_SIGNED &&
+      peep & P_BASEALIGNED == 0)
+  )
+  ( (! (pcs_flags PCS_NOFP))
+    (|| (== A.r2 R_SP)
+        (== A.r2 R_FP)
+    )
+  )
+  ( (= A.peep (| A.peep P_BASEALIGNED)) )
+)
+
+;;;#  96
+( ( A(op & ~(J_SIGNED+J_UNSIGNED+J_ALIGNMENT) == J_LDRWK &&
+      peep & P_BASEALIGNED == 0)
+  )
+  ( (pcs_flags PCS_NOFP)
+    (== A.r2 R_SP)
+  )
+  ( (= A.peep (| A.peep P_BASEALIGNED)) )
+)
+
+;;;#  97
+( ( A(op & ~J_ALIGNMENT == J_LDRBK+J_SIGNED &&
+      peep & P_BASEALIGNED == 0)
+  )
+  ( (pcs_flags PCS_NOFP)
+    (== A.r2 R_SP)
+  )
+  ( (= A.peep (| A.peep P_BASEALIGNED)) )
+)
+
+;;;#  98
+( ( B()
+    A(op <- (J_LDRWK+J_SIGNED+J_ALIGN2   J_LDRWR+J_SIGNED+J_ALIGN2
+             J_LDRWK+J_UNSIGNED+J_ALIGN2 J_LDRWR+J_UNSIGNED+J_ALIGN2) &&
+      peep & P_MS == 0)
+  )
+  ( (|| (! (config CONFIG_NO_UNALIGNED_LOADS))
+        (!= (& A.peep P_BASEALIGNED) 0)
+    )
+    (! (config CONFIG_HALFWORD_SPT))
+  )
+  ( (= B.peep (| A.peep P_MS))
+    (= B.op A.op)
+    (= B.r1 A.r1)
+    (= B.r2 A.r2)
+    (= B.r3 A.r3)
+        (= B.r4 GAP)
+    (= A.op (| J_SHRK (& A.op J_SIGNED)))
+    (= A.r2 A.r1)
+    (= A.r3 16)
+    (= A.peep 0)
+  )
+)
+
+;;;#  99
+( ( B()
+    A(op <- (J_LDRBK+J_SIGNED+J_ALIGN1 J_LDRBR+J_SIGNED+J_ALIGN1) &&
+      peep & P_MS == 0)
+  )
+  ( (|| (! (config CONFIG_NO_UNALIGNED_LOADS))
+        (!= (& A.peep P_BASEALIGNED) 0)
+    )
+    (! (config CONFIG_HALFWORD_SPT))
+  )
+  ( (= B.peep (| A.peep P_MS))
+    (= B.op A.op)
+    (= B.r1 A.r1)
+    (= B.r2 A.r2)
+    (= B.r3 A.r3)
+        (= B.r4 GAP)
+    (= A.op J_SHRK+J_SIGNED)
+    (= A.r2 A.r1)
+    (= A.r3 24)
+    (= A.peep 0)
+  )
+)
+
+;;;#  100
+( ( A(op == J_MOVR && peep == 0)
+    B(op <- (J_CMPK+Q_LT J_CMPK+Q_GE) && dead_r2)
+    C(op <- (J_B+Q_LT J_CONDEXEC+Q_LT J_B+Q_GE J_CONDEXEC+Q_GE))
+  )
+  ( (regset_unkilled (bit A.r3))
+    (== B.r2 A.r3)
+    (== B.r3 0)
+    (== A.cond Q_AL)
+  )
+  ( (kill B)
+    (= A.dead_r3 1)
+    (= A.peep (| (| A.peep P_CMPZ)
+                 (^ (& C.op Q_MASK) Q_MI^Q_LT)))
+    (= C.op (^ C.op Q_MI^Q_LT))
+  )
+)
+
+;;;#  101
+( ( A(op == J_MOVR && peep == 0)
+    B(op <- (J_CMPK+Q_LT J_CMPK+Q_GE))
+    C(op <- (J_B+Q_LT J_CONDEXEC+Q_LT J_B+Q_GE J_CONDEXEC+Q_GE))
+  )
+  ( (== B.r2 A.r3)
+    (== B.r3 0)
+    (== A.cond Q_AL)
+    (regset_unkilled (bit A.r3))
+  )
+  ( (kill B)
+    (= A.peep (| (| A.peep P_CMPZ)
+                 (^ (& C.op Q_MASK) Q_MI^Q_LT)))
+    (= C.op (^ C.op Q_MI^Q_LT))
+  )
+)
+
+;;;#  102
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLK J_SHRK J_RORK) &&
+      peep == 0)
+    B(op & ~(J_SIGNED+J_UNSIGNED) <- (J_LDRR+J_ALIGN4 J_STRR+J_ALIGN4 J_LDRBR+J_ALIGN4 J_STRBR+J_ALIGN4))
+  )
+  ( (== A.r1 B.r3)
+    (!= B.r2 B.r3)
+  )
+  ( (kill A)
+    (= B.op (| B.op (shift_k A.op A.r3)))
+    (= B.r3 A.r2)
+  )
+)
+
+;;;#  103
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLK J_SHRK J_RORK) &&
+      peep == 0)
+    B(op & ~(J_SIGNED+J_UNSIGNED) <- (J_LDRR+J_ALIGN4 J_STRR+J_ALIGN4 J_LDRBR+J_ALIGN4 J_STRBR+J_ALIGN4))
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+  )
+  ( (kill A)
+    (swapr2r3 B)
+    (= B.op (| B.op (shift_k A.op A.r3)))
+    (= B.r3 A.r2)
+  )
+)
+
+;;; Parallel peepholes to the four above (80-83), handling calls to a function
+;;; vector (rather than function pointer vector).  Comments as for the above;
+;;; in addition we need separate ADDR and SUBR peepholes, but no SUBK one
+;;; because it was turned into ADDK earlier.
+;;;#  104
+( ( A(op == J_ADDK)
+    B(op == J_CALLR)
+  )
+  ( (!= A.r2 R_LR)
+    (== A.r1 B.r3)
+    (regset_unkilled (bit A.r2))
+    (! (pcs_flags PCS_INTERWORK))
+  )
+  ( (= B.op J_CALLX)
+    (= B.r3 A.r3)
+    (= B.r4 A.r2)
+    (= B.peep A.peep)
+    (kill A)
+  )
+)
+
+;;;#  105
+( ( A(op & ~J_SHIFTMASK == J_ADDR)
+    B(op == J_CALLR)
+  )
+  ( (!= A.r2 R_LR) (!= A.r3 R_LR)
+    (== A.r1 B.r3)
+    (regset_unkilled (bit A.r2))
+    (! (pcs_flags PCS_INTERWORK))
+  )
+  ( (= B.op (| J_CALLXR (& A.op J_SHIFTMASK)))
+    (= B.r3 A.r3)
+    (= B.r4 A.r2)
+    (= B.peep A.peep)
+    (kill A)
+  )
+)
+
+;;;#  106
+( ( A(op & ~J_SHIFTMASK == J_SUBR)
+    B(op == J_CALLR)
+  )
+  ( (!= A.r2 R_LR) (!= A.r3 R_LR)
+    (== A.r1 B.r3)
+    (regset_unkilled (bit A.r2))
+    (! (pcs_flags PCS_INTERWORK))
+  )
+  ( (= B.op (| (| J_CALLXR J_NEGINDEX) (& A.op J_SHIFTMASK)))
+    (= B.r3 A.r3)
+    (= B.r4 A.r2)
+    (= B.peep A.peep)
+    (kill A)
+  )
+)
+
+;;;#  107
+( ( A(op == J_ADDK)
+    B(op == J_TAILCALLR)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unkilled (bit A.r2))
+    (! (pcs_flags PCS_INTERWORK))
+  )
+  ( (= B.op J_TAILCALLX)
+    (= B.r3 A.r3)
+    (= B.r4 A.r2)
+    (= B.peep A.peep)
+    (kill A)
+  )
+)
+
+;;;#  108
+( ( A(op & ~J_SHIFTMASK == J_ADDR)
+    B(op == J_TAILCALLR)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unkilled (bit A.r2))
+    (! (pcs_flags PCS_INTERWORK))
+  )
+  ( (= B.op (| J_TAILCALLXR (& A.op J_SHIFTMASK)))
+    (= B.r3 A.r3)
+    (= B.r4 A.r2)
+    (= B.peep A.peep)
+    (kill A)
+  )
+)
+
+;;;#  109
+( ( A(op & ~J_SHIFTMASK == J_SUBR)
+    B(op == J_TAILCALLR)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unkilled (bit A.r2))
+    (! (pcs_flags PCS_INTERWORK))
+  )
+  ( (= B.op (| (| J_TAILCALLXR J_NEGINDEX) (& A.op J_SHIFTMASK)))
+    (= B.r3 A.r3)
+    (= B.r4 A.r2)
+    (= B.peep A.peep)
+    (kill A)
+  )
+)
+
+;;; Parallel set of peepholes to set P_POST, with base SP, so weaker
+;;; constraints on intervening instructions (but adjustment of SP offsets
+;;; if peephole succeeds).
+;;; (This set don't allow any store access with base other than sp between
+;;;  two instructions matching the peephole; there's another set (142+)
+;;;  which do, but require sp to be decremented. All in aid of not moving
+;;;  a stack increment past an instruction which may be referencing data
+;;;  on that bit of stack).
+
+;;;#  110
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRWK+J_ALIGN2 J_STRWK+J_ALIGN2
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4)
+      && peep & P_PRE+P_POST+P_MS == 0)
+    B(op == J_ADDK)
+  )
+  ( (== A.r2 R_SP)
+    (== A.r3 0)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (!= B.r1 A.r1)
+    (offsetinrange B.r3 A.op)
+    (nostackrefsbelow A B.r3)
+    (nointervening G_NONSTACKMEM)
+    (regset_unkilled (bit R_SP))
+  )
+  ( (kill B)
+    (= A.r3 B.r3)
+    (= A.peep (| A.peep P_POST))
+    (adjuststackrefs A B.r3)
+  )
+)
+
+;;;#  111
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRWK+J_ALIGN2 J_STRWK+J_ALIGN2
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4)
+      &! peep & P_POST == 0)
+    B(op == J_ADDK)
+  )
+  ( (== A.r2 R_SP)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (!= B.r1 A.r1)
+    (offsetinrange (+ A.r3 B.r3) A.op)
+    (nostackrefsbelow A B.r3)
+    (nointervening G_NONSTACKMEM)
+    (regset_unkilled (bit R_SP))
+  )
+  ( (kill B)
+    (= A.r3 (+ A.r3 B.r3))
+    (adjuststackrefs A B.r3)
+  )
+)
+
+;;;#  112
+( ( A(op <- (J_LDRFK+J_ALIGN4 J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8
+             J_STRFK+J_ALIGN4 J_STRDK+J_ALIGN4 J_STRDK+J_ALIGN8)
+      && peep == 0)
+    B(op == J_ADDK)
+  )
+  ( (== A.r2 R_SP)
+    (== A.r3 0)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (offsetinrange B.r3 A.op)
+    (nostackrefsbelow A B.r3)
+    (nointervening G_NONSTACKMEM)
+    (regset_unkilled (bit R_SP))
+  )
+  ( (kill B)
+    (= A.r3 B.r3)
+    (= A.peep P_POST)
+    (adjuststackrefs A B.r3)
+  )
+)
+
+;;;#  113
+( ( A(op <- (J_LDRFK+J_ALIGN4 J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8
+             J_STRFK+J_ALIGN4 J_STRDK+J_ALIGN4 J_STRDK+J_ALIGN8)
+      && peep == P_POST)
+    B(op == J_ADDK)
+  )
+  ( (== A.r2 R_SP)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (offsetinrange (+ A.r3 B.r3) A.op)
+    (nostackrefsbelow A B.r3)
+    (nointervening G_NONSTACKMEM)
+    (regset_unkilled (bit R_SP))
+  )
+  ( (kill B)
+    (= A.r3 (+ A.r3 B.r3))
+    (adjuststackrefs A B.r3)
+  )
+)
+
+;;;#  114
+( ( A(op == J_MOVC+J_ALIGN4 && peep & P_POST == 0)
+    B(op == J_ADDK && peep == 0)
+  )
+  ( (== A.r2 R_SP)
+    (== A.r2 B.r2)
+    (== B.r1 B.r2)
+    (== A.r3 B.r3)
+    (nostackrefsbelow A B.r3)
+    (nointervening G_NONSTACKMEM)
+    (regset_unkilled (bit R_SP))
+  )
+  ( (kill B)
+    (= A.peep (| A.peep P_POST))
+    (adjuststackrefs A B.r3)
+  )
+)
+
+;;;#  115
+( ( A(op == J_MOVK)
+    B(op == J_MOVK)
+  )
+  ( (== A.r1 B.r1)
+    (== A.r3 B.r3)
+    (regset_unkilled (bit A.r1))
+  )
+  ( (kill B)
+  )
+)
+
+;;;#  116
+( ( A(op == J_MOVK)
+    B(op == J_MOVK)
+    C(op & ~J_ALIGNMENT <- (J_STRK J_STRR J_STRBK J_STRBR) && dead_r1)
+  )
+  ( (== A.r3 B.r3)
+    (== B.r1 C.r1)
+    (nointervening G_ANY)
+  )
+  ( (= C.r1 A.r1)
+    (kill B)
+    (= C.dead_r1 0)
+  )
+)
+
+;;;#  117
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) == J_SHLK && peep & P_SETCC == 0)
+    B(op == J_SHRK+J_UNSIGNED && peep & P_SETCC == 0)
+  )
+  ( (== A.r3 B.r3)
+    (== A.r1 B.r2)
+  )
+  ( (kill A)
+    (= B.op J_ANDK) (= B.r2 A.r2) (= B.r3 (- (bit (- 32 B.r3)) 1))
+  )
+)
+
+;;;#  118
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) == J_SHLK && peep == 0)
+    B(op == J_SHRK+J_UNSIGNED && dead_r2 && peep == 0)
+    C(op & ~(J_SHIFTMASK+J_NEGINDEX) <- (J_ADDR J_SUBR J_LDRR+J_ALIGN4 J_LDRWR+J_ALIGN2 J_LDRBR+J_ALIGN1) && dead_r3 && peep == 0)
+  )
+  ( (!= (& C.op J_SHIFTVAL) 0)
+    (== (& C.op J_SHIFTR) 0)
+    (> B.r3 (+ A.r3 (& (>> C.op J_SHIFTPOS) SHIFT_MASK)))
+    (== A.r1 B.r2)
+    (== B.r1 C.r3)
+    (nointervening G_ANY)
+  )
+  ( (= A.op J_ANDK) (= A.r3 (- (bit (- 32 A.r3))
+                              (bit (- B.r3 A.r3))))
+    (kill B)
+    (= C.op (| (& C.op ~J_SHIFTMASK)
+               (| J_SHIFTR (<< (- B.r3
+                                  (+ A.r3
+                                     (& (>> C.op J_SHIFTPOS) SHIFT_MASK)))
+                            J_SHIFTPOS))))
+  )
+)
+
+;;;#  119
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) == J_SHLK && peep == 0)
+    B(op == J_MOVK && peep == 0)
+    C(op & ~(J_SHIFTVAL+J_UNSIGNED) <- (J_CMPR+J_SHIFTR+Q_EQ J_CMPR+J_SHIFTR+Q_NE) && dead_r2 && dead_r3)
+  )
+  ( (== C.r2 B.r1)
+    (== C.r3 A.r1)
+    (<= A.r3 (>> (& C.op J_SHIFTVAL)
+                J_SHIFTPOS))
+    (nointervening G_ANY)
+  )
+  ( (kill B)
+    (= A.op J_ANDK)
+    (= A.r3 (- (bit (- 32 A.r3))
+              (bit (- (>> (& C.op J_SHIFTVAL)
+                          J_SHIFTPOS)
+                    A.r3))))
+    (= C.op (+ J_CMPK (& C.op Q_MASK)))
+    (= C.r2 A.r1)
+    (= C.r3 (<< B.r3 (- (>> (& C.op J_SHIFTVAL)
+                          J_SHIFTPOS)
+                      A.r3)))
+  )
+)
+
+;;;#  120
+( ( A(op == J_MOVK)
+    B(op & ~J_SHIFTVAL == J_ANDR+J_SHIFTR && dead_r2 && dead_r1 && dead_r3 && peep == 0)
+  )
+  ( (== B.r2 A.r1)
+    (!= (& B.peep P_CMPZ) 0)
+  )
+  ( (kill A)
+    (= B.op J_ANDK) (= B.r2 B.r3)
+    (= B.r3 (<< A.r3 (>> (& B.op J_SHIFTVAL)
+                       J_SHIFTPOS)))
+  )
+)
+
+;;;#  121
+( ( A(op == J_MOVK)
+    B(op & ~J_SHIFTVAL == J_ANDR+J_SHIFTR && dead_r2 && dead_r1 && peep == 0)
+  )
+  ( (== B.r2 A.r1)
+    (!= (& B.peep P_CMPZ) 0)
+  )
+  ( (kill A)
+    (= B.op J_ANDK) (= B.r2 B.r3)
+    (= B.r3 (<< A.r3 (>> (& B.op J_SHIFTVAL)
+                       J_SHIFTPOS)))
+    (= B.dead_r2 1)
+  )
+)
+
+;;;#  122
+;;; Improve code generated by C++ pointer casts
+;;; (code is of the form  (let (b) (b = p; (b != 0) ? (char *)b+k : 0)
+;;; which makes it very likely that b and the expression result will be
+;;; allocated the same register.
+( ( A(op <- (J_CMPK+Q_EQ J_CMPK+Q_UEQ))
+    B(op <- (J_CONDEXEC+Q_EQ J_CONDEXEC+Q_UEQ))
+    C(op == J_MOVK)
+  )
+  ( (== A.r2 C.r1)
+    (== A.r3 C.r3)
+    (regset_unkilled (bit C.r1))
+  )
+  ( (kill C)
+  )
+)
+
+;;;#  123
+( ( A(op == J_MOVK)
+    B(op & ~(J_SIGNED+J_UNSIGNED) <- (J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4 J_STRBK+J_ALIGN1) && dead_r2)
+  )
+  ( (difficult_constant A.r3)
+    (! (difficult_constant (^ A.r3 (& A.r3 (* (lsb A.r3) 0xff)))))
+    (offsetinrange (+ B.r3 (& A.r3 (* (lsb A.r3) 0xff))) B.op)
+    (== A.r1 B.r2)
+    (regset_unused (bit A.r1))
+  )
+  ( (= A.r3 (^ A.r3 (& A.r3 (* (lsb A.r3) 0xff))))
+    (= B.r3 (+ B.r3 (& A.r3 (* (lsb A.r3) 0xff))))
+  )
+)
+
+;;;#  124
+( ( A(op == J_MOVK)
+    B(op & ~(J_SIGNED+J_UNSIGNED) <- (J_LDRWK+J_ALIGN2 J_LDRBK+J_ALIGN1) && dead_r2)
+  )
+  ( (difficult_constant A.r3)
+    (! (difficult_constant (^ A.r3 (& A.r3 (* (lsb A.r3) 0xff)))))
+    (offsetinrange (+ B.r3 (& A.r3 (* (lsb A.r3) 0xff))) B.op)
+    (== A.r1 B.r2)
+    (regset_unused (bit A.r1))
+  )
+  ( (= A.r3 (^ A.r3 (& A.r3 (* (lsb A.r3) 0xff))))
+    (= B.r3 (+ B.r3 (& A.r3 (* (lsb A.r3) 0xff))))
+    (= B.peep (| B.peep P_BASEALIGNED))
+  )
+)
+
+;;; MOVDIR + MOVDIR -> MOVDIM, MOVIDR+MOVIDR -> MOVIDM.
+;;; Allows use of just one ld/stm. No point to MOVDIM + MOVDIR etc
+;;; peepholes (just four argument registers).  Two peepholes for each
+;;; (for the two different orders of the argument registers).
+;;;#  125
+( ( A(op == J_MOVDIR)
+    B(op == J_MOVDIR)
+  )
+  ( (> A.r1 B.r1)
+    (> A.r3 B.r3)
+    (regset_unused (bit A.r1)) (regset_unused (bit A.r2))
+    (regset_unkilled (bit A.r3))
+  )
+  ( (kill A)
+    (= B.op J_MOVDIM)
+    (= B.r1 (| (bit A.r1) (| (bit A.r2) (| (bit B.r1) (bit B.r2)))))
+    (= B.r2 0)
+    (= B.r3 (| (bit A.r3) (bit B.r3)))
+  )
+)
+
+;;;#  126
+( ( A(op == J_MOVDIR)
+    B(op == J_MOVDIR)
+  )
+  ( (< A.r1 B.r1)
+    (< A.r3 B.r3)
+    (regset_unused (bit A.r1)) (regset_unused (bit A.r2))
+    (regset_unkilled (bit A.r3))
+  )
+  ( (kill A)
+    (= B.op J_MOVDIM)
+    (= B.r1 (| (bit A.r1) (| (bit A.r2) (| (bit B.r1) (bit B.r2)))))
+    (= B.r2 0)
+    (= B.r3 (| (bit A.r3) (bit B.r3)))
+  )
+)
+
+;;;#  127
+( ( A(op == J_MOVIDR)
+    B(op == J_MOVIDR)
+  )
+  ( (> A.r1 B.r1)
+    (> A.r3 B.r3)
+    (regset_unused (bit A.r1))
+    (regset_unkilled (bit A.r2)) (regset_unkilled (bit A.r3))
+  )
+  ( (kill A)
+    (= B.op J_MOVIDM)
+    (= B.r1 (| (bit A.r1) (bit B.r1)))
+    (= B.r2 0)
+    (= B.r3 (| (bit A.r2) (| (bit A.r3) (| (bit B.r2) (bit B.r3)))))
+  )
+)
+
+;;;#  128
+( ( A(op == J_MOVIDR)
+    B(op == J_MOVIDR)
+  )
+  ( (< A.r1 B.r1)
+    (< A.r3 B.r3)
+    (regset_unused (bit A.r1))
+    (regset_unkilled (bit A.r2)) (regset_unkilled (bit A.r3))
+  )
+  ( (kill A)
+    (= B.op J_MOVIDM)
+    (= B.r1 (| (bit A.r1) (bit B.r1)))
+    (= B.r2 0)
+    (= B.r3 (| (bit A.r2) (| (bit A.r3) (| (bit B.r2) (bit B.r3)))))
+  )
+)
+
+;;;#  129
+;;; MOVDIR + load popping stack -> MOVDIM.
+( ( A(op == J_MOVDIR)
+    B(op == J_LDRK+J_ALIGN4 && peep == P_POST)
+  )
+  ( (== B.r2 R_SP)
+    (== B.r3 4)
+    (> B.r1 A.r2)
+    (regset_unused M_SP) (regset_unused (bit B.r1))
+  )
+  ( (kill B)
+    (= A.op J_MOVDIM)
+    (= A.r1 (| (| (bit A.r1) (bit A.r2)) (bit B.r1)))
+    (= A.r2 0)
+    (= A.r3 (bit A.r3))
+  )
+)
+
+;;;; Another peephole to improve handling of loading fp arguments into
+;;;; integer registers.
+;;;#  130
+( ( A(op == J_STRDK+J_ALIGN4 && peep & P_POST == 0)
+    B(op == J_MOVDIR && dead_r3)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unused (bit B.r1)) (regset_unused (bit B.r2))
+    (regset_unused (bit A.r1))
+    (nointervening G_ANYSTR)
+  )
+  ( (= B.op J_POPMB)
+    (= B.r1 (+ A.r3 8))
+    (= B.r2 A.r2)
+    (= B.r3 (| (bit B.r1) (bit B.r2)))
+  )
+)
+
+;;;#  131
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLR J_SHRR J_RORR) &&
+      peep == 0)
+    B(op == J_NOTR && peep & P_RSHIFT == 0)
+  )
+  ( (== A.r1 B.r3)
+    (regset_unkilled (bit A.r3))
+  )
+  ( (kill A)
+    (= B.peep (| B.peep (shift_p A.op)))
+    (= B.r4 A.r3)
+    (= B.r3 A.r2)
+  )
+)
+
+;;;#  132
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLK J_SHRK J_RORK) &&
+      peep == 0)
+    B(op == J_NOTR && peep & P_RSHIFT == 0)
+  )
+  ( (== A.r1 B.r3)
+  )
+  ( (kill A)
+    (= B.op (| B.op (shift_k A.op A.r3)))
+    (= B.r3 A.r2)
+  )
+)
+
+;;;#  133
+( ( A(op == J_MULK)
+    B(op == J_NOTR && peep & P_RSHIFT == 0 && dead_r3)
+  )
+  ( (== A.r1 B.r3)
+    (!= A.r3 0)
+    (!= (& A.r3 (- 0 A.r3)) 1)
+    (regset_unused (bit A.r1))
+  )
+  ( (= A.r3 (/ A.r3 (& A.r3 (- 0 A.r3))))
+    (= B.op (| B.op (shift_k J_SHLK (log2 (& A.r3 (- 0 A.r3))))))
+  )
+)
+
+;;;#  134
+( ( A(op == J_ORRK && peep == 0)
+  )
+  ( (== A.r3 0xffffffff)
+  )
+  ( (= A.op J_MOVK)
+    (= A.r2 GAP)
+  )
+)
+
+;;;#  135
+( ( A(op == J_ANDK)
+    B(op == J_ORRK)
+  )
+  ( (== A.r1 B.r2)
+    (== (& A.r3 B.r3) A.r3)
+    (regset_unused (bit A.r1))
+  )
+  ( (kill A)
+    (= B.op J_MOVK)
+    (= B.r2 GAP)
+  )
+)
+
+;;;#  136
+( ( A(op <- (J_LDRK+J_ALIGN1 J_STRK+J_ALIGN1))
+  )
+  ( (!= (& A.peep P_BASEALIGNED) 0)
+    (== (& A.r3 3) 0)
+  )
+  ( (= A.op (+ A.op J_ALIGN4-J_ALIGN1))
+    (= A.peep (^ A.peep P_BASEALIGNED))
+  )
+)
+
+;;;#  137
+( ( A (op == J_ANDK)
+    B (op & ~(J_SIGNED+J_UNSIGNED) == J_SHRK && peep & P_SETCC == 0)
+  )
+  ( (== A.r1 B.r2)
+    (== 0 (& (^ 0xffffffffL A.r3)
+             (- 0 (<< 1 B.r3))))
+  )
+  ( (kill A)
+    (= B.r2 A.r2)
+  )
+)
+
+;;;#  138
+( ( A(op == J_ADDR && peep == 0)
+    B(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4) &&
+      peep & P_PRE+P_POST == 0)
+  )
+  ( (== A.r1 A.r2)
+    (!= A.r1 R_SP)
+    (== B.r3 0)
+    (== B.r2 A.r1)
+    (!= B.r1 B.r2)
+    (regset_unused (bit A.r3))
+  )
+  ( (= B.op (+ B.op J_LDRR-J_LDRK))
+    (= B.peep (| B.peep P_PRE))
+    (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  139
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4)
+      && peep == 0)
+    B(op == J_ADDR)
+  )
+  ( (== A.r3 0)
+    (!= A.r2 R_SP)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (!= B.r1 A.r1)
+    (!= A.r1 B.r3)
+    (regset_unused (bit A.r2))
+    (regset_unused (bit B.r3))
+  )
+  ( (= A.op (+ A.op J_LDRR-J_LDRK))
+    (kill B)
+    (= A.r3 B.r3)
+    (= A.peep P_POST)
+  )
+)
+
+;;;#  140
+( ( A(op == J_SUBR && peep == 0)
+    B(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4) &&
+      peep & P_PRE+P_POST == 0)
+  )
+  ( (== A.r1 A.r2)
+    (!= A.r1 R_SP)
+    (== B.r3 0)
+    (== B.r2 A.r1)
+    (!= B.r1 B.r2)
+  )
+  ( (= B.op (+ B.op J_LDRR-J_LDRK+J_NEGINDEX))
+    (= B.peep (| B.peep P_PRE))
+    (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  141
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4)
+      && peep == 0)
+    B(op == J_SUBR)
+  )
+  ( (== A.r3 0)
+    (!= A.r2 R_SP)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (!= B.r1 A.r1)
+    (!= A.r1 B.r3)
+    (regset_unused (bit A.r2))
+  )
+  ( (= A.op (+ A.op J_LDRR-J_LDRK+J_NEGINDEX))
+    (kill B)
+    (= A.r3 B.r3)
+    (= A.peep P_POST)
+  )
+)
+
+;;;#  142
+( ( A(op == J_ADDK)
+    B(op == J_B)
+  )
+  ( (== A.r1 R_SP)
+    (== A.r2 R_SP)
+    (== B.r3 RETLABV)
+    (regset_unused M_SP)
+    (pcs_flags PCS_NOFP)
+  )
+  ( (kill A)
+    (= B.r4 (+ B.r4 A.r3))
+    (= B.peep (| B.peep P_ADJUSTSP))
+  )
+)
+
+;;;#  143
+( ( A(op & ~J_ALIGNMENT <- (J_STRBK J_LDRBK+J_SIGNED) && peep & (P_PRE+P_POST) == 0)
+    B(op & ~J_ALIGNMENT == J_LDRBK+J_UNSIGNED && peep & (P_PRE+P_POST) == 0)
+  )
+  ( (== A.r2 B.r2)
+    (== A.r3 B.r3)
+    (nointervening G_POSSIBLEALIASSTR)
+  )
+  ( (= B.op J_ANDK) (= B.r2 A.r1) (= B.r3 255) (= B.peep 0)
+  )
+)
+
+;;;#  144
+( ( A(op == J_MOVK)
+    B(op == J_MOVK && peep & P_SETCC == 0)
+  )
+  ( (difficult_constant A.r3) (difficult_constant (^ A.r3 0xffffffff))
+    (difficult_constant B.r3) (difficult_constant (^ B.r3 0xffffffff))
+    (|| (! (difficult_constant (- B.r3 A.r3)))
+        (! (difficult_constant (- A.r3 B.r3)))
+    )
+    (regset_unkilled (bit A.r1))
+  )
+  ( (= B.op J_ADDK) (= B.r2 A.r1) (= B.r3 (- B.r3 A.r3))
+  )
+)
+
+;;;#  145
+( ( A(op == J_ANDK)
+    B(op <- (J_STRBK+J_ALIGN1 J_STRBR+J_ALIGN1) && dead_r1)
+  )
+  ( (== A.r3 255)
+    (== A.r1 B.r1)
+    (regset_unkilled (bit A.r2))
+  )
+  ( (kill A)
+    (= B.r1 A.r2)
+  )
+)
+
+;;; Another parallel set of peepholes to set P_POST, with base SP.
+;;; See comment attached to peephole 106.
+;;;#  146
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRWK+J_ALIGN2 J_STRWK+J_ALIGN2
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4)
+      && peep & P_PRE+P_POST+P_MS == 0)
+    B(op == J_ADDK)
+  )
+  ( (== A.r2 R_SP)
+    (== A.r3 0)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (!= B.r1 A.r1)
+    (offsetinrange B.r3 A.op) 
+    (<= B.r3 0)
+    (nostackrefsbelow A B.r3)
+    (regset_unkilled (bit R_SP))
+  )
+  ( (kill B)
+    (= A.r3 B.r3)
+    (= A.peep (| A.peep P_POST))
+    (adjuststackrefs A B.r3)
+  )
+)
+
+;;;#  147
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRWK+J_ALIGN2 J_STRWK+J_ALIGN2
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4)
+      &! peep & P_POST == 0)
+    B(op == J_ADDK)
+  )
+  ( (== A.r2 R_SP)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (!= B.r1 A.r1)
+    (offsetinrange (+ A.r3 B.r3) A.op)
+    (<= (+ A.r3 B.r3) 0)
+    (nostackrefsbelow A B.r3)
+    (regset_unkilled (bit R_SP))
+  )
+  ( (kill B)
+    (= A.r3 (+ A.r3 B.r3))
+    (adjuststackrefs A B.r3)
+  )
+)
+
+;;;#  148
+( ( A(op <- (J_LDRFK+J_ALIGN4 J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8
+             J_STRFK+J_ALIGN4 J_STRDK+J_ALIGN4 J_STRDK+J_ALIGN8)
+      && peep == 0)
+    B(op == J_ADDK)
+  )
+  ( (== A.r2 R_SP)
+    (== A.r3 0)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (offsetinrange B.r3 A.op) 
+    (<= B.r3 0)
+    (nostackrefsbelow A B.r3)
+    (regset_unkilled (bit R_SP))
+  )
+  ( (kill B)
+    (= A.r3 B.r3)
+    (= A.peep P_POST)
+    (adjuststackrefs A B.r3)
+  )
+)
+
+;;;#  149
+( ( A(op <- (J_LDRFK+J_ALIGN4 J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8
+             J_STRFK+J_ALIGN4 J_STRDK+J_ALIGN4 J_STRDK+J_ALIGN8)
+      && peep == P_POST)
+    B(op == J_ADDK)
+  )
+  ( (== A.r2 R_SP)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (offsetinrange (+ A.r3 B.r3) A.op) 
+    (<= (+ A.r3 B.r3) 0)
+    (nostackrefsbelow A B.r3)
+    (regset_unkilled (bit R_SP))
+  )
+  ( (kill B)
+    (= A.r3 (+ A.r3 B.r3))
+    (adjuststackrefs A B.r3)
+  )
+)
+
+;;; A set of parallel peepholes to set P_PRE, with base SP.
+;;; There are (alternative) extra constraints, to ensure that moving the stack
+;;; adjustment can't leave a referenced (via another register) object outside
+;;; the stack.
+
+;;;#  150
+( ( A(op == J_ADDK && peep == 0)
+    B(op <- (J_LDRFK+J_ALIGN4 J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8
+             J_STRFK+J_ALIGN4 J_STRDK+J_ALIGN4 J_STRDK+J_ALIGN8))
+  )
+  ( (== A.r1 A.r2)
+    (== A.r1 R_SP)
+    (== B.r3 0)
+    (<= A.r3 0) 
+    (offsetinrange A.r3 B.op)
+    (== B.r2 A.r1)
+  )
+  ( (= B.peep (| B.peep P_PRE))
+    (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  151
+( ( A(op == J_ADDK && peep == 0)
+    B(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRWK+J_ALIGN2 J_STRWK+J_ALIGN2
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4))
+  )
+  ( (== A.r1 A.r2)
+    (== A.r1 R_SP)
+    (== B.r3 0)
+    (<= A.r3 0) 
+    (offsetinrange A.r3 B.op)
+    (== B.r2 A.r1)
+    (!= B.r1 B.r2)
+  )
+  ( (= B.peep (| B.peep P_PRE))
+    (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  152
+( ( A(op == J_ADDK && peep == 0)
+    B(op <- (J_LDRFK+J_ALIGN4 J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8
+             J_STRFK+J_ALIGN4 J_STRDK+J_ALIGN4 J_STRDK+J_ALIGN8))
+  )
+  ( (== A.r1 A.r2)
+    (== A.r1 R_SP)
+    (== B.r3 0)
+    (>= A.r3 0) 
+    (offsetinrange A.r3 B.op)
+    (== B.r2 A.r1)
+    (nointervening G_NONSTACKMEM)
+  )
+  ( (= B.peep (| B.peep P_PRE))
+    (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;;#  153
+( ( A(op == J_ADDK && peep == 0)
+    B(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRWK+J_ALIGN2 J_STRWK+J_ALIGN2
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4))
+  )
+  ( (== A.r1 A.r2)
+    (== A.r1 R_SP)
+    (== B.r3 0)
+    (>= A.r3 0) 
+    (offsetinrange A.r3 B.op)
+    (== B.r2 A.r1)
+    (!= B.r1 B.r2)
+    (nointervening G_NONSTACKMEM)
+  )
+  ( (= B.peep (| B.peep P_PRE))
+    (= B.r3 A.r3)
+    (kill A)
+  )
+)
+
+;;; Peepholes to transform CMPR (a & k) (b & k)
+;;; where k has n high-order 0s and 32-n low-order 1s
+;;; into CMPR (a << n) (b << n).
+;;; If the comparison is signed, we need to turn it into an unsigned one.
+;;; We do this via a P_UNSIGNEDCOND bit marking the need to change the condition
+;;; rather than include a J_B or J_CONDEXEC at the end of this pattern since
+;;; that would never match (an ANDK+CMPR pattern would match first).
+;;;#  154
+( ( A(op == J_ANDK && peep == 0)
+    B(op == J_ANDK && peep == 0)
+    C(op <- (J_CMPR+Q_EQ J_CMPR+Q_NE J_CMPR+Q_HI J_CMPR+Q_LS J_CMPR+Q_LO J_CMPR+Q_HS) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r2 && dead_r3)
+  )
+  ( (== A.r1 C.r2)
+    (== B.r1 C.r3)
+    (== A.r3 B.r3)
+    (nointervening G_ANY)
+    (== (lsb (+ A.r3 1)) (+ A.r3 1))
+  )
+  ( (= A.op J_SHLK) (= A.r3 (- 32 (log2 (+ A.r3 1))))
+    (= C.op (| C.op (shift_k J_SHLK (- 32 (log2 (+ A.r3 1))))))
+    (= C.r2 A.r1)
+    (= C.r3 B.r2)
+    (kill B)
+  )
+)
+
+;;;#  155
+( ( A(op == J_ANDK && peep == 0)
+    B(op == J_ANDK && peep == 0)
+    C(op <- (J_CMPR+Q_LT J_CMPR+Q_GE J_CMPR+Q_LE J_CMPR+Q_GT) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r2 && dead_r3)
+  )
+  ( (== A.r1 C.r2)
+    (== B.r1 C.r3)
+    (== A.r3 B.r3)
+    (nointervening G_ANY)
+    (== (lsb (+ A.r3 1)) (+ A.r3 1))
+  )
+  ( (= A.op J_SHLK) (= A.r3 (- 32 (log2 (+ A.r3 1))))
+    (= C.op (| C.op (shift_k J_SHLK (- 32 (log2 (+ A.r3 1))))))
+    (= C.r2 A.r1)
+    (= C.r3 B.r2)
+    (= C.peep (| C.peep P_UNSIGNEDCOND))
+    (kill B)
+  )
+)
+
+;;; Peepholes to transform CMPR (a & k) (b & k)
+;;; where k has 32-n high-order 1s and n low-order 0s
+;;; into CMPR (a >> n) (b >> n).
+;;; The signedness of the shift is taken from the signedness of the comparison
+;;;#  156
+( ( A(op == J_ANDK && peep == 0)
+    B(op == J_ANDK && peep == 0)
+    C(op <- (J_CMPR+Q_EQ J_CMPR+Q_NE J_CMPR+Q_LE J_CMPR+Q_LT J_CMPR+Q_GE J_CMPR+Q_GT) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r2 && dead_r3)
+  )
+  ( (== A.r1 C.r2)
+    (== B.r1 C.r3)
+    (== A.r3 B.r3)
+    (nointervening G_ANY)
+    (== (| A.r3 (- (lsb A.r3) 1)) 0xffffffff)
+  )
+  ( (= A.op J_SHRK+J_SIGNED) (= A.r3 (log2 (lsb A.r3)))
+    (= C.op (| C.op (shift_k J_SHRK+J_SIGNED (log2 (lsb A.r3)))))
+    (= C.r2 A.r1)
+    (= C.r3 B.r2)
+    (kill B)
+  )
+)
+
+;;;#  157
+( ( A(op == J_ANDK && peep == 0)
+    B(op == J_ANDK && peep == 0)
+    C(op <- (J_CMPR+Q_HI J_CMPR+Q_LS J_CMPR+Q_LO J_CMPR+Q_HS) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r2 && dead_r3)
+  )
+  ( (== A.r1 C.r2)
+    (== B.r1 C.r3)
+    (== A.r3 B.r3)
+    (nointervening G_ANY)
+    (== (| A.r3 (- (lsb A.r3) 1)) 0xffffffff)
+  )
+  ( (= A.op J_SHRK+J_UNSIGNED) (= A.r3 (log2 (lsb A.r3)))
+    (= C.op (| C.op (shift_k J_SHRK+J_UNSIGNED (log2 (lsb A.r3)))))
+    (= C.r2 A.r1)
+    (= C.r3 B.r2)
+    (kill B)
+  )
+)
+
+;;;; The following four peepholes turn (a & k) op xx
+;;;; where k has n high-order 0s and 32-n low-order 1s
+;;;; and neither k nor ~k are 8-bit constants
+;;;; into ((a << n) >> n) op xx, with the right shift folded into op.
+;;;; (One peephole covers (op & k) the second operand of op, the other three the
+;;;; first operand).
+;;;#  158
+( ( A(op == J_ANDK && peep == 0)
+    B(op & ~Q_MASK <- (J_ADDR J_SUBR J_RSBR J_ANDR J_ORRR J_EORR J_CMPR) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r3)
+    ; the mask is required where op==J_CMPR, but is harmless in the other cases.
+  )
+  ( (== A.r1 B.r3)
+    (!= B.r2 B.r3)
+    (regset_unused (bit A.r1))
+    (difficult_constant A.r3) (difficult_constant (^ 0xffffffff A.r3))
+    (== (lsb (+ A.r3 1)) (+ A.r3 1))
+  )
+  ( (= A.op J_SHLK) (= A.r3 (- 32 (log2 (+ A.r3 1))))
+    (= B.op (| B.op (shift_k J_SHRK+J_UNSIGNED (- 32 (log2 (+ A.r3 1))))))
+    (= B.r3 A.r1)
+  )
+)
+
+;;;#  159
+( ( A(op == J_ANDK && peep == 0)
+    B(op <- (J_ADDR J_ANDR J_ORRR J_EORR) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (regset_unused (bit A.r1))
+    (difficult_constant A.r3) (difficult_constant (^ 0xffffffff A.r3))
+    (== (lsb (+ A.r3 1)) (+ A.r3 1))
+  )
+  ( (= A.op J_SHLK) (= A.r3 (- 32 (log2 (+ A.r3 1))))
+    (= B.op (| B.op (shift_k J_SHRK+J_UNSIGNED (- 32 (log2 (+ A.r3 1))))))
+    (swapr2r3 B)
+    (= B.r3 A.r1)
+  )
+)
+
+;;;#  160
+( ( A(op == J_ANDK && peep == 0)
+    B(op <- (J_SUBR J_RSBR) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (regset_unused (bit A.r1))
+    (difficult_constant A.r3) (difficult_constant (^ 0xffffffff A.r3))
+    (== (lsb (+ A.r3 1)) (+ A.r3 1))
+  )
+  ( (= A.op J_SHLK) (= A.r3 (- 32 (log2 (+ A.r3 1))))
+    (= B.op (| (^ B.op J_SUBR^J_RSBR) (shift_k J_SHRK+J_UNSIGNED (- 32 (log2 (+ A.r3 1))))))
+    (swapr2r3 B)
+    (= B.r3 A.r1)
+  )
+)
+
+;;;#  161
+( ( A(op == J_ANDK && peep == 0)
+    B(op <- (J_CMPR+Q_LT J_CMPR+Q_GE J_CMPR+Q_LE J_CMPR+Q_GT
+             J_CMPR+Q_LO J_CMPR+Q_HS J_CMPR+Q_LS J_CMPR+Q_HI) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (regset_unused (bit A.r1))
+    (difficult_constant A.r3) (difficult_constant (^ 0xffffffff A.r3))
+    (== (lsb (+ A.r3 1)) (+ A.r3 1))
+  )
+  ( (= A.op J_SHLK) (= A.r3 (- 32 (log2 (+ A.r3 1))))
+    (= B.op (q_swap (| B.op (shift_k J_SHRK+J_UNSIGNED (- 32 (log2 (+ A.r3 1)))))))
+    (swapr2r3 B)
+    (= B.r3 A.r1)
+    (= B.peep (| B.peep P_SWAPCOND))
+  )
+)
+
+;;;; The following four peepholes turn (a & k) op xx
+;;;; where k has 32-n high-order 1s and n low-order 0s
+;;;; and neither k nor ~k are 8-bit constants
+;;;; into ((a >> n) << n) op xx, with the right shift folded into op.
+;;;; (One peephole covers (op & k) the second operand of op, the other three the
+;;;; first operand).
+;;;#  162
+( ( A(op == J_ANDK && peep == 0)
+    B(op & ~Q_MASK <- (J_ADDR J_SUBR J_RSBR J_ANDR J_ORRR J_EORR J_CMPR) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r3)
+    ; the mask is required where op==J_CMPR, but is harmless in the other cases.
+  )
+  ( (== A.r1 B.r3)
+    (!= B.r2 B.r3)
+    (regset_unused (bit A.r1))
+    (difficult_constant A.r3) (difficult_constant (^ 0xffffffff A.r3))
+    (== (| A.r3 (- (lsb A.r3) 1)) 0xffffffff)
+  )
+  ( (= A.op J_SHRK+J_UNSIGNED) (= A.r3 (log2 (lsb A.r3)))
+    (= B.op (| B.op (shift_k J_SHLK (log2 (lsb A.r3)))))
+    (= B.r3 A.r1)
+  )
+)
+
+;;;#  163
+( ( A(op == J_ANDK && peep == 0)
+    B(op <- (J_ADDR J_ANDR J_ORRR J_EORR J_CMPR+Q_EQ J_CMPR+Q_NE) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (regset_unused (bit A.r1))
+    (difficult_constant A.r3) (difficult_constant (^ 0xffffffff A.r3))
+    (== (| A.r3 (- (lsb A.r3) 1)) 0xffffffff)
+  )
+  ( (= A.op J_SHRK+J_UNSIGNED) (= A.r3 (log2 (lsb A.r3)))
+    (= B.op (| B.op (shift_k J_SHLK (log2 (lsb A.r3)))))
+    (swapr2r3 B)
+    (= B.r3 A.r1)
+  )
+)
+
+;;;#  164
+( ( A(op == J_ANDK && peep == 0)
+    B(op <- (J_SUBR J_RSBR) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (regset_unused (bit A.r1))
+    (difficult_constant A.r3) (difficult_constant (^ 0xffffffff A.r3))
+    (== (| A.r3 (- (lsb A.r3) 1)) 0xffffffff)
+  )
+  ( (= A.op J_SHRK+J_UNSIGNED) (= A.r3 (log2 (lsb A.r3)))
+    (= B.op (| (^ B.op J_SUBR^J_RSBR) (shift_k J_SHLK (log2 (lsb A.r3)))))
+    (swapr2r3 B)
+    (= B.r3 A.r1)
+  )
+)
+
+;;;#  165
+( ( A(op == J_ANDK && peep == 0)
+    B(op <- (J_CMPR+Q_LT J_CMPR+Q_GE J_CMPR+Q_LE J_CMPR+Q_GT
+             J_CMPR+Q_LO J_CMPR+Q_HS J_CMPR+Q_LS J_CMPR+Q_HI) &&
+      peep & P_RSHIFT == 0 &&
+      dead_r2)
+  )
+  ( (== A.r1 B.r2)
+    (!= B.r2 B.r3)
+    (regset_unused (bit A.r1))
+    (difficult_constant A.r3) (difficult_constant (^ 0xffffffff A.r3))
+    (== (| A.r3 (- (lsb A.r3) 1)) 0xffffffff)
+  )
+  ( (= A.op J_SHRK+J_UNSIGNED) (= A.r3 (log2 (lsb A.r3)))
+    (= B.op (q_swap (| B.op (shift_k J_SHLK (log2 (lsb A.r3))))))
+    (swapr2r3 B)
+    (= B.r3 A.r1)
+    (= B.peep (| B.peep P_SWAPCOND))
+  )
+)
+
+;;;; Peepholes to tidy away the P_UNSIGNEDCOND and P_SWAPCOND introduced above.
+;;;; These must match (or a syserr in gen.c will follow).
+;;;#  166
+( ( A(op & ~(J_SHIFTMASK | Q_MASK) == J_CMPR &! peep & P_UNSIGNEDCOND == 0)
+    B(op & ~Q_MASK <- (J_B J_CONDEXEC))
+  )
+  ( )
+  ( (= A.op (q_tounsigned A.op))
+    (= A.peep (^ A.peep P_UNSIGNEDCOND))
+    (= B.op (q_tounsigned B.op))
+  )
+)
+
+;;;#  167
+( ( A(op & ~(J_SHIFTMASK | Q_MASK) == J_CMPR &! peep & P_SWAPCOND == 0)
+    B(op & ~Q_MASK <- (J_B J_CONDEXEC) && peep & P_SWAPPEDOPS == 0)
+  )
+  ( (nointervening G_ALLOWCONDEXEC)
+    (!= ( & B.op Q_MASK) Q_AL)          ; cannot go beyond last condexec
+  )
+  ( 
+    (= B.op (q_swap B.op))
+    (= B.peep (| B.peep P_SWAPPEDOPS))
+  )
+)
+
+
+;;;#  168
+( ( A(op <- (J_CMPR+Q_EQ J_CMPR+Q_UEQ))
+    B(op <- (J_CONDEXEC+Q_EQ J_CONDEXEC+Q_UEQ))
+    C(op == J_MOVK)
+    D(op <- (J_CONDEXEC+Q_NE J_CONDEXEC+Q_UNE))
+    E(loads_r1)
+  )
+  ( (nointervening G_ANY)
+    (== C.r3 0)
+    (== C.r1 E.r1)
+  )
+  ( (= A.op J_SUBR) (= A.r1 C.r1) (= A.peep (| P_CMPZ (| A.peep (& A.op Q_MASK))))
+    (kill B) (kill C)
+  )
+)
+
+;;;#  169
+( ( A(op <- (J_CMPK+Q_EQ J_CMPK+Q_UEQ))
+    B(op <- (J_CONDEXEC+Q_EQ J_CONDEXEC+Q_UEQ))
+    C(op == J_MOVK)
+    D(op <- (J_CONDEXEC+Q_NE J_CONDEXEC+Q_UNE))
+    E(loads_r1)
+  )
+  ( (nointervening G_ANY)
+    (== C.r3 0)
+    (== C.r1 E.r1)
+    (physreg_notread E C.r1)
+  )
+  ( (= A.op J_ADDK) (= A.r1 C.r1) (= A.r3 (- 0 A.r3)) (= A.peep (| P_CMPZ (| A.peep (& A.op Q_MASK))))
+    (kill B) (kill C)
+  )
+)
+
+;;;#  170
+( ( A(loads_r1 && dead_r1 &! peep & P_CMPZ == 0)
+    B(op <- (J_CONDEXEC+Q_EQ J_CONDEXEC+Q_UEQ))
+    C(op == J_MOVK)
+    D(op <- (J_CONDEXEC+Q_NE J_CONDEXEC+Q_UNE))
+    E(loads_r1)
+  )
+  ( (nointervening G_ANY)
+    (== C.r3 0)
+    (== C.r1 E.r1)
+    (physreg_notread E C.r1)
+  )
+  ( (= A.r1 C.r1) (= A.peep (| A.peep P_ZONLY))
+    (kill B) (kill C)
+  )
+)
+
+;;;#  171
+( ( A(op == J_LDRWK+J_ALIGN2 &! peep & P_BASEALIGNED == 0)
+    B(op == J_LDRWK+J_ALIGN2 &! peep & P_BASEALIGNED == 0)
+    C(op <- (J_ANDR J_BICR J_ORRR J_EORR) &&
+      uses_r2 && uses_r3 && dead_r2 && dead_r3)
+    D(op == J_SHLK)
+    E(op == J_SHRK+J_SIGNED)
+  )
+  ( (nointervening G_ANY)
+    (== A.r1 C.r2)
+    (== B.r1 C.r3)
+    (== D.r2 C.r1) (== D.r1 D.r2) (== D.r3 16)
+    (== E.r2 D.r1) (== E.r1 E.r2) (== E.r3 16)
+    (! (config CONFIG_HALFWORD_SPT))
+  )
+  ( (= A.peep (| A.peep P_MS))
+    (= B.peep (| B.peep P_MS))
+    (kill D)
+  )
+)
+
+;;;#  172
+( ( A(op == J_LDRWK+J_ALIGN2 &! peep & P_BASEALIGNED == 0)
+    B(op == J_LDRWK+J_ALIGN2 &! peep & P_BASEALIGNED == 0)
+    C(op <- (J_ANDR J_BICR J_ORRR J_EORR) &&
+      uses_r2 && uses_r3 && dead_r2 && dead_r3)
+    D(op == J_SHLK)
+    E(op == J_SHRK+J_SIGNED)
+  )
+  ( (nointervening G_ANY)
+    (== A.r1 C.r3)
+    (== B.r1 C.r2)
+    (== D.r2 C.r1) (== D.r1 D.r2) (== D.r3 16)
+    (== E.r2 D.r1) (== E.r1 E.r2) (== E.r3 16)
+    (! (config CONFIG_HALFWORD_SPT))
+  )
+  ( (= A.peep (| A.peep P_MS))
+    (= B.peep (| B.peep P_MS))
+    (kill D)
+  )
+)
+
+;;;#  173
+( ( A(op == J_LDRWK+J_ALIGN2 &! peep & P_BASEALIGNED == 0)
+    C(op <- (J_ADDK J_RSBK J_ANDK J_ORRK J_EORK) &&
+      dead_r2 && uses_r2 &! uses_r3)
+    D(op == J_SHLK)
+    E(op == J_SHRK+J_SIGNED)
+  )
+  ( (nointervening G_ANY)
+    (== A.r1 C.r2)
+    (== D.r2 C.r1) (== D.r1 D.r2) (== D.r3 16)
+    (== E.r2 D.r1) (== E.r1 E.r2) (== E.r3 16)
+    (! (config CONFIG_HALFWORD_SPT))
+  )
+  ( (= A.peep (| A.peep P_MS))
+    (= C.r3 (<< C.r3 16))
+    (kill D)
+  )
+)
+
+;;;#  174
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLK J_SHRK J_RORK) &&
+      peep == 0)
+    B(op & ~(J_SHIFTMASK+Q_MASK) <- (J_ADDR J_SUBR J_RSBR J_ANDR J_ORRR J_EORR J_CMPR) &&
+      peep & P_RSHIFT == 0)
+   ; The mask is required for J_CMPR, but harmless for the other cases.
+  )
+  ( (== A.r1 B.r3)
+    (!= B.r2 B.r3)
+    (== A.op (shift_op B.op))
+  )
+  ( (kill A)
+    (= B.op (| (& B.op ~J_SHIFTMASK)
+               (shift_k A.op (+ (shift_d B.op) A.r3))))
+    (= B.r3 A.r2)
+  )
+)
+
+;;;#  175
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_SHLK J_SHRK J_RORK) &&
+      peep == 0)
+    B(op & J_SHIFTMASK == J_NOTR && peep & P_RSHIFT == 0)
+  )
+  ( (== A.r1 B.r3)
+    (== A.op (shift_op B.op))
+  )
+  ( (kill A)
+    (= B.op (| (& B.op ~J_SHIFTMASK)
+               (shift_k A.op (+ (shift_d B.op) A.r3))))
+    (= B.r3 A.r2)
+  )
+)
+
+;;;# 176
+( ( A(op <- (J_LDRWK+J_ALIGN2 J_LDRWR+J_ALIGN2) && peep == 0)
+    X()
+    B(op == J_ANDK)
+  )
+  ( (== A.r1 B.r2)
+    (== (+ B.r3 1) (& (+ B.r3 1) (- 0 (+ B.r3 1))))
+    (config CONFIG_BIG_ENDIAN)
+    (! (config CONFIG_HALFWORD_SPT))
+  )
+  ( (= A.peep P_MS)
+    (= X.op J_SHLK) (= X.r1 B.r1) (= X.r2 B.r2) (= X.r3 (- 16 (log2 (+ B.r3 1))))
+    (= B.op J_SHRK+J_UNSIGNED) (= B.r2 B.r1) (= B.r3 (- 32 (log2 (+ B.r3 1))))
+  )
+)
+
+
+;;;# 177
+( ( A(op & ~J_UNSIGNED == J_CMPK+Q_EQ)
+    B(op & ~J_UNSIGNED == J_CONDEXEC+Q_EQ)
+    C(op == J_MOVK)
+    D(op == J_B)
+    E(op == J_CONDEXEC)
+    F(op == J_LABEL)
+    G(op == J_STACK)
+    H(loads_r1)
+  )
+  ( (== A.r3 0)
+    (== C.r3 0)
+    (== H.r1 C.r1) (physreg_notread H C.r1)
+    (!= A.r2 C.r1)
+    (nointervening G_ANY)
+  )
+  ( (= A.op J_ADDK) (= A.r1 C.r1) (= A.r3 (- 0 A.r3)) (= A.peep (| A.peep P_CMPZ))
+    (kill C)
+  )
+)
+
+;;;# 178
+( ( A(op & ~J_UNSIGNED == J_CMPK+Q_EQ)
+    B(op & ~J_UNSIGNED == J_CONDEXEC+Q_EQ)
+    C(op == J_MOVK)
+    D(op & ~J_UNSIGNED == J_CONDEXEC+Q_NE)
+    E(loads_r1)
+  )
+  ( (== A.r3 0)
+    (== C.r3 0)
+    (== E.r1 C.r1) (physreg_notread E C.r1)
+    (!= A.r2 C.r1)
+    (nointervening G_ANY)
+  )
+  ( (= A.op J_ADDK) (= A.r1 C.r1) (= A.r3 (- 0 A.r3)) (= A.peep (| A.peep P_CMPZ))
+    (kill C)
+  )
+)
+
+;;;# 179
+( ( A(op & ~J_UNSIGNED == J_CMPK+Q_NE)
+    B(op & ~J_UNSIGNED == J_CONDEXEC+Q_NE)
+    C(loads_r1)
+    D(op & ~J_UNSIGNED == J_CONDEXEC+Q_EQ)
+    E(op == J_MOVK)
+  )
+  ( (== A.r3 0)
+    (== E.r3 0)
+    (== E.r1 C.r1) (physreg_notread C E.r1)
+    (nointervening G_ANY)
+  )
+  ( (= A.op J_ADDK) (= A.r1 C.r1) (= A.r3 (- 0 A.r3)) (= A.peep (| A.peep P_CMPZ))
+    (kill E)
+  )
+)
+
+;;;# 180
+( ( A(op == J_MOVDK && peep == 0)
+    B(op == J_SUBDR)
+  )
+  ( (== A.r1 B.r2)
+    (fp_literal A J_RSBDK)
+  )
+  ( (kill A)
+    (= B.op J_RSBDK)
+    (swapr2r3 B)
+    (= B.r3 A.r3)
+  )
+)
+
+;;;# 181
+( ( A(op == J_MOVDK && peep == 0)
+    B(op == J_SUBFR)
+  )
+  ( (== A.r1 B.r2)
+    (fp_literal A J_RSBFK)
+  )
+  ( (kill A)
+    (= B.op J_RSBFK)
+    (swapr2r3 B)
+    (= B.r3 A.r3)
+  )
+)
+
+;;;# 182
+( ( A(op == J_MOVDK && peep == 0)
+    B(op == J_DIVDR)
+  )
+  ( (== A.r1 B.r2)
+    (fp_literal A J_RDVDK)
+  )
+  ( (kill A)
+    (= B.op J_RDVDK)
+    (swapr2r3 B)
+    (= B.r3 A.r3)
+  )
+)
+
+;;;# 183
+( ( A(op == J_MOVDK && peep == 0)
+    B(op == J_DIVDR)
+  )
+  ( (== A.r1 B.r2)
+    (fp_literal A J_RDVDK)
+  )
+  ( (kill A)
+    (= B.op J_RDVDK)
+    (swapr2r3 B)
+    (= B.r3 A.r3)
+  )
+)
+
+;;;; Remove some detritus from the start of the body of a function receiving
+;;;; a double value in integer registers, the only use of which is immediate
+;;;; passing as argument to another function. (Hardware FP).
+
+;;;# 184
+( ( A(op == J_MOVIDR && dead_r2 && dead_r3)
+    B(op == J_MOVDIR && dead_r3)
+  )
+  ( (== A.r2 B.r1)
+    (== A.r3 B.r2)
+    (== A.r1 B.r3)
+  )
+  ( (kill B)
+    (kill A)
+  )
+)
+
+;;;# 185
+( ( A(op == J_MOVIDR && dead_r2 && dead_r3)
+    B(op == J_MOVDIR)
+  )
+  ( (== A.r2 B.r1)
+    (== A.r3 B.r2)
+    (== A.r1 B.r3)
+  )
+  ( (kill B)
+    (= A.dead_r2 0)
+        (= A.dead_r3 0)
+  )
+)
+
+
+;;;; Four peepholes to produce more efficient calls to software FP helper
+;;;; functions by reversing the arguments (and maybe calling a reversed
+;;;; function: sub -> rsb eg) if one of the arguments is a function result.
+;;;; Earlier parts of the compiler do this if the function result was an
+;;;; explicit operand: this sweeps up the case where it's only so after
+;;;; register allocation has caused a variable to vanish.
+
+;;;# 186
+( ( A(op == J_MOVR)
+    B(op == J_MOVR)
+    C(op <- (J_ADCON J_ADCONV J_ADCOND))
+    D(op == J_LDRK+J_ALIGN4)
+    E(op == J_LDRK+J_ALIGN4)
+    F(op <- (J_CALLK J_TAILCALLK))
+  )
+  ( (== A.r1 R_A3) (== A.r3 R_A1)
+    (== B.r1 R_A4) (== B.r3 R_A2)
+    (== C.r1 R_A2)
+    (== D.r2 R_A2) (== D.r3 0) (== D.r1 R_A1)
+    (== E.r2 R_A2) (== E.r3 4) (== E.r1 R_A2)
+    (asymmetric_fn F)
+    (nointervening G_ANY)
+  )
+  ( (kill A)
+    (kill B)
+    (= C.r1 R_A4)
+    (= D.r2 R_A4) (= D.r1 R_A3)
+    (= E.r2 R_A4) (= E.r1 R_A4)
+    (reverse_fn F)
+  )
+)
+
+;;;# 187
+( ( A(op == J_MOVR)
+    B(op == J_MOVR)
+    C(op <- (J_ADCON J_ADCONV J_ADCOND))
+    D(op == J_LDRK+J_ALIGN4)
+    E(op == J_LDRK+J_ALIGN4)
+    F(op <- (J_CALLK J_TAILCALLK))
+  )
+  ( (== A.r1 R_A3) (== A.r3 R_A1)
+    (== B.r1 R_A4) (== B.r3 R_A2)
+    (== C.r1 R_A2)
+    (== D.r2 R_A2) (== D.r3 0) (== D.r1 R_A1)
+    (== E.r2 R_A2) (== E.r3 4) (== E.r1 R_A2)
+    (symmetric_fn F)
+    (nointervening G_ANY)
+  )
+  ( (kill A)
+    (kill B)
+    (= C.r1 R_A4)
+    (= D.r2 R_A4) (= D.r1 R_A3)
+    (= E.r2 R_A4) (= E.r1 R_A4)
+  )
+)
+
+;;;# 188
+( ( A(op == J_MOVR)
+    B(op == J_MOVR)
+    C(op == J_MOVR)
+    D(op == J_MOVR)
+    F(op <- (J_CALLK J_TAILCALLK))
+  )
+  ( (== A.r1 R_A3) (== A.r3 R_A1)
+    (== B.r1 R_A4) (== B.r3 R_A2)
+    (== C.r1 R_A1)
+    (== D.r1 R_A2)
+    (asymmetric_fn F)
+    (nointervening G_ANY)
+  )
+  ( (kill A)
+    (kill B)
+    (= C.r1 R_A3)
+    (= D.r1 R_A4)
+    (reverse_fn F)
+  )
+)
+
+;;;# 189
+( ( A(op == J_MOVR)
+    B(op == J_MOVR)
+    C(op == J_MOVR)
+    D(op == J_MOVR)
+    F(op <- (J_CALLK J_TAILCALLK))
+  )
+  ( (== A.r1 R_A3) (== A.r3 R_A1)
+    (== B.r1 R_A4) (== B.r3 R_A2)
+    (== C.r1 R_A1)
+    (== D.r1 R_A2)
+    (symmetric_fn F)
+    (nointervening G_ANY)
+  )
+  ( (kill A)
+    (kill B)
+    (= C.r1 R_A3)
+    (= D.r1 R_A4)
+  )
+)
+
+;;;# 190
+;  Remove redundant unsigned compares
+;
+;  ADDR Rx, Ry, Rz  -> ADDRS Rx, Ry, Rz
+;  CMPR Rx, Ry (LO/HS) CONDEXEC HS/LO
+;  CONDEXEC/B LO/HS
+;
+( ( A(op == J_ADDR)
+    B(op <- (J_CMPR+Q_LO J_CMPR+Q_HS))
+    C(op & ~Q_MASK <- (J_CONDEXEC J_B))
+  )
+  (
+    (== (& B.op Q_MASK) (& C.op Q_MASK))
+    (== (& A.peep P_CMPZ) 0) 
+    (== A.r1 B.r2)
+    (== A.r2 B.r3)
+    (!= B.r2 B.r3)
+  )
+  (
+    (= A.peep (| A.peep P_SETCC+P_CMPZ))
+    (kill B)
+    (= C.op (^ C.op Q_HS^Q_LO))
+  )
+)
+
+;;;# 191
+;  Remove redundant unsigned compares
+;
+;  ADDR Rx, Ry, Rz  -> ADDRS Rx, Ry, Rz
+;  CMPR Rx, Rz (LO/HS) CONDEXEC HS/LO
+;  CONDEXEC/B LO/HS
+;
+( ( A(op == J_ADDR)
+    B(op <- (J_CMPR+Q_LO J_CMPR+Q_HS))
+    C(op & ~Q_MASK <- (J_CONDEXEC J_B))
+  )
+  (
+    (== (& B.op Q_MASK) (& C.op Q_MASK))
+    (== (& A.peep P_CMPZ) 0) 
+    (== A.r1 B.r2)
+    (== A.r3 B.r3)
+    (!= B.r2 B.r3)
+  )
+  (
+    (= A.peep (| A.peep P_SETCC+P_CMPZ))
+    (kill B)
+    (= C.op (^ C.op Q_HS^Q_LO))
+  )
+)
+
+;;;# 192
+;  Remove redundant unsigned compares
+;
+;  ADDK Rx, Ry, #N  -> ADDRS Rx, Ry, #N
+;  CMPK Rx, #N (LO/HS) CONDEXEC HS/LO
+;  CONDEXEC/B LO/HS
+;
+( ( A(op == J_ADDK)
+    B(op <- (J_CMPK+Q_LO J_CMPK+Q_HS))
+    C(op & ~Q_MASK <- (J_CONDEXEC J_B))
+  )
+  (
+    (== (& B.op Q_MASK) (& C.op Q_MASK))
+    (== (& A.peep P_CMPZ) 0) 
+    (== A.r1 B.r2)
+    (== A.r3 B.r3)
+  )
+  (
+    (= A.peep (| A.peep P_SETCC+P_CMPZ))
+    (kill B)
+    (= C.op (^ C.op Q_HS^Q_LO))
+  )
+)
+
+;;;# 193
+;  Remove redundant unsigned compares
+;
+;  ADDR Rx, Ry, Rz  -> ADDRS Rx, Ry, Rz
+;  CMPR Ry, Rx (LS/HI) CONDEXEC HS/LO
+;  CONDEXEC/B LS/HI
+;
+( ( A(op == J_ADDR)
+    B(op <- (J_CMPR+Q_LS J_CMPR+Q_HI))
+    C(op & ~Q_MASK <- (J_CONDEXEC J_B))
+  )
+  (
+    (== (& B.op Q_MASK) (& C.op Q_MASK))
+    (== (& A.peep P_CMPZ) 0) 
+    (== A.r1 B.r3)
+    (== A.r2 B.r2)
+    (!= B.r2 B.r3)
+  )
+  (
+    (= A.peep (| A.peep P_SETCC+P_CMPZ))
+    (kill B)
+    (= C.op (^ C.op Q_HS^Q_LS))
+  )
+)
+
+;;;# 194
+;  Remove redundant unsigned compares
+;
+;  ADDR Rx, Ry, Rz  -> ADDRS Rx, Ry, Rz
+;  CMPR Rz, Rx (LS/HI) CONDEXEC HS/LO
+;  CONDEXEC/B LS/HI
+;
+( ( A(op == J_ADDR)
+    B(op <- (J_CMPR+Q_LS J_CMPR+Q_HI))
+    C(op & ~Q_MASK <- (J_CONDEXEC J_B))
+  )
+  (
+    (== (& B.op Q_MASK) (& C.op Q_MASK))
+    (== (& A.peep P_CMPZ) 0) 
+    (== A.r1 B.r3)
+    (== A.r3 B.r2)
+    (!= B.r2 B.r3)
+  )
+  (
+    (= A.peep (| A.peep P_SETCC+P_CMPZ))
+    (kill B)
+    (= C.op (^ C.op Q_HS^Q_LS))
+  )
+)
+
+;;;# 195
+;  Merge ADCK and ADDR
+;
+;  ADDR Rx, Ry, Rz  -> ADCR Rx, Ry, Rz   ; needs to be more general
+;  ADCK Rx, Rx, #0
+;
+( (
+    A(op <- (J_ADDR J_ADDK) && peep & (P_SETCC+P_CMPZ )== 0)
+    B(op == J_ADCK)
+  )
+  (
+    (== B.r1 B.r2)
+    (== A.r1 B.r2)
+    (== B.r3 0)
+    (regset_unused A.r1)
+  )
+  (
+    (kill B)
+    (= A.op (+ A.op J_ADCR-J_ADDR))
+    (swapr2r3 A)
+  )
+)
+
+;;;# 196
+;  Recognize ADC - could be better...
+;
+;  CONDEXEC HS    -> ADC Ry, Rx, #0
+;  ADD Ry, Rx, #1
+;  CONDEXEC AL
+;
+( ( A(op == J_CONDEXEC+Q_HS)
+    B(op == J_ADDK)
+    C(op == J_CONDEXEC)
+  )
+  (
+    (nointervening G_ANY)
+    (== B.r3 1)
+  )
+  (
+    (kill A)
+    (= B.op J_ADCK)
+    (= B.r3 0)
+    (= B.cond Q_AL)
+  )
+)
+
+;;;# 197
+;  Recognize the boolean not operator (!x or x == 0)
+;
+;  CMPK  Rx, #0   -> RSBK     Ry, Rx, #1
+;  CONDEXEC NE       CONDEXEC LO
+;  MOVK  Ry, #0      MOVK     Ry, #0
+;  CONDEXEC EQ       CONDEXEC AL 
+;  MOVK  Ry, #1
+;  CONDEXEC AL
+;
+( ( A(op == J_CMPK+Q_NE && peep & ~(P_CMPZ+P_SETCC) == 0)
+    B(op == J_CONDEXEC+Q_NE)
+    C(op == J_MOVK)
+    D(op == J_CONDEXEC+Q_EQ)
+    E(op == J_MOVK)
+    F(op == J_CONDEXEC)
+   )
+   (
+      (== A.r3 0)
+      (== C.r3 0)
+      (== E.r3 1)
+      (== C.r1 E.r1)
+      (nointervening G_ANY)
+   )
+   (
+      (= A.op J_RSBK)
+      (= A.peep P_CMPZ)
+      (= A.r1 C.r1)
+      (= A.r3 1)
+      (= B.op J_CONDEXEC+Q_LO)
+      (kill D)
+      (kill E)
+   )
+)
+
+;;;# 198
+;  Recognize the boolean not equals operator (x != N)
+;
+;  CMPK  Rx, #N   -> SUBK     Ry, Rx, #N
+;  CONDEXEC EQ       CONDEXEC NE
+;  MOVK  Ry, #0      MOVK     Ry, #1
+;  CONDEXEC NE       CONDEXEC AL 
+;  MOVK  Ry, #1
+;  CONDEXEC AL
+;
+( ( A(op == J_CMPK+Q_EQ && peep & ~(P_CMPZ+P_SETCC) == 0)
+    B(op == J_CONDEXEC+Q_EQ)
+    C(op == J_MOVK)
+    D(op == J_CONDEXEC+Q_NE)
+    E(op == J_MOVK)
+    F(op == J_CONDEXEC)
+   )
+   (
+      (== C.r3 0)
+      (== E.r3 1)
+      (== C.r1 E.r1)
+      (nointervening G_ANY)
+   )
+   (
+      (= A.op J_SUBK)
+      (= A.peep P_CMPZ)
+      (= A.r1 C.r1)
+      (kill B)
+      (kill C)
+   )
+)
+
+;;;# 199
+( ( A(op <- (J_LDRFK+J_ALIGN4 J_LDRDK+J_ALIGN4 J_LDRDK+J_ALIGN8
+             J_STRFK+J_ALIGN4 J_STRDK+J_ALIGN4 J_STRDK+J_ALIGN8)
+      && peep == 0)
+    B(op == J_ADDK && peep == 0)
+  )
+  ( (== B.r3 A.r3)
+    (!= A.r2 R_SP)
+    (== A.r2 B.r1)
+    (== B.r1 B.r2)
+    (offsetinrange B.r3 A.op)
+    (regset_unused (bit A.r2))
+  )
+  ( (= A.peep (| A.peep P_PRE))
+    (kill B)
+  )
+)
+
+;;;#  200
+( ( A(op & ~(J_SIGNED+J_UNSIGNED) <- (J_STRBK+J_ALIGN1 J_LDRBK+J_ALIGN1
+                                      J_LDRWK+J_ALIGN2 J_STRWK+J_ALIGN2
+                                      J_LDRK+J_ALIGN4 J_STRK+J_ALIGN4)
+      && peep & P_PRE+P_POST+P_MS == 0)
+    B(op == J_ADDK && peep == 0)
+  )
+  ( (== A.r3 B.r3)
+    (!= A.r2 R_SP)
+    (== B.r1 A.r2)
+    (== B.r1 B.r2)
+    (!= B.r1 A.r1)
+    (offsetinrange B.r3 A.op)
+    (regset_unused (bit A.r2))
+  )
+  ( (kill B)
+    (= A.peep (| A.peep P_PRE))
+  )
+)
+
+;;;# 201
+; Remove redundant unsigned compares with zero
+;
+; OP  Rx, ...  ->  OPS Rx, ...
+; CMP Rx, #0       BNE / BEQ
+; BHI / BLS
+;
+( ( A(op & ~(J_SHIFTMASK+J_SIGNED+J_UNSIGNED) <-
+            (       J_MOVR
+                    J_NEGR
+                    J_NOTR
+             J_ADDK J_ADDR
+             J_SUBK J_SUBR
+             J_RSBK J_RSBR
+             J_ANDK J_ANDR
+                    J_BICR
+             J_ORRK J_ORRR
+             J_EORK J_EORR
+             J_SHLR J_SHLK
+             J_SHRR J_SHRK
+             J_RORR J_RORK
+                         J_ADCK J_ADCR
+                         J_SBCK J_SBCR
+                         J_RSCK J_RSCR
+             J_MULR J_MULK
+             J_MLAR) &&
+
+      peep & ~P_RSHIFT == 0)
+
+    B(op <- (J_CMPK+Q_HI J_CMPK+Q_LS))
+    C(op <- (J_B+Q_HI J_CONDEXEC+Q_HI J_B+Q_LS J_CONDEXEC+Q_LS))
+  )
+  (
+    (== B.r2 A.r1)
+    (== B.r3 0)
+    (== A.cond Q_AL)
+  )
+  ( (kill B)
+    (= A.peep (| A.peep P_CMPZ))
+    (= C.op (^ C.op Q_HI^Q_UNE))                                         ; !!! This is very dangerous!!!
+  )
+)
+
+;;;# 202
+; Remove redundant (un)signed compares with zero: while (i--)
+;
+; MOVS Ry, Rx  ->  SUBS Rx, Rx, #1
+; SUB  Rx, Rx, #1  BLO
+; BEQ
+;
+( ( A(op == J_MOVR && peep & P_CMPZ == P_CMPZ && dead_r1)
+    B(op == J_ADDK)
+    C(op <- (J_B+Q_EQ J_B+Q_UEQ J_CONDEXEC+Q_EQ J_CONDEXEC+Q_UEQ))
+  )
+  (
+    (== A.r3 B.r1)
+    (== B.r1 B.r2)
+    (== B.r3 -1)
+    (== A.cond Q_AL)
+  )
+  ( (kill A)
+    (= B.peep (| B.peep P_CMPZ))
+    (= C.op (| (& C.op ~Q_MASK) Q_LO))
+  )
+)
+
+;;;# 203
+; Remove redundant (un)signed compares with zero: while (i--)
+;
+; MOVS Ry, Rx  ->  SUBS Rx, Rx, #1
+; SUB  Rx, Rx, #1  BHS
+; BNE
+;
+( ( A(op == J_MOVR && peep & P_CMPZ == P_CMPZ && dead_r1)
+    B(op == J_ADDK)
+    C(op <- (J_B+Q_NE J_B+Q_UNE J_CONDEXEC+Q_NE J_CONDEXEC+Q_UNE))
+  )
+  (
+    (== A.r3 B.r1)
+    (== B.r1 B.r2)
+    (== B.r3 -1)
+    (== A.cond Q_AL)
+  )
+  ( (kill A)
+    (= B.peep (| B.peep P_CMPZ))
+    (= C.op (| (& C.op ~Q_MASK) Q_HS))
+  )
+)
+
+;;;#  204 (stops 167)
+( ( A(op & ~(J_SHIFTMASK | Q_MASK) == J_CMPR &! peep & P_SWAPCOND == 0)
+    B(op <- (J_B+Q_AL J_CONDEXEC+Q_AL))
+  )
+  ( (nointervening G_ALLOWCONDEXEC)
+  )
+  (
+    (= A.peep (& A.peep ~P_SWAPCOND))
+  )
+)
+
+
+;;;# 205  - DISABLED - Need proper way to introduce temporary registers...
+; Combine MULK and ADDR to MLAK
+;
+; MULK Rt, Rx, #N          -> MLAK Rz, Rx, #N << K, Ry
+; ADDR Rz, Ry, Rt, LSL #K
+;
+;( ( A(op == J_MULK && peep & P_CMPZ == 0)
+;    B(op & ~J_SHIFTMASK == J_ADDR && dead_r3)
+;  )
+;  (
+;    (== A.r1 B.r3)
+;    (!= B.r2 B.r3)
+;  )
+;  (
+;    (= A.peep B.peep)
+;    (= A.op J_MLAK)
+;    (= A.r1 B.r1)
+;    (= A.r4 B.r2)
+;    (= A.r3 (<< A.r3 (shift_d B.op)))
+;    (kill B)
+;  )
+;)
+
+;;; End of arm/peeppat

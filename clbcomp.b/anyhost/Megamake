@@ -1,0 +1,115 @@
+# Megamake - Makefile creating Meta-Makefile
+# Copyright (C) Advanced RISC Machines 1994. All rights reserved.
+# SPDX-Licence-Identifier: Apache-2.0
+#
+# RCS $Revision$
+# Checkin $Date$
+# Revising $Author$
+
+DEP=shared
+
+include $(MEGAMAKE_INCLUDE)
+
+######################################################################
+# This section contains TOOL specifc stuff which is NOT HOST dependent
+#  (ie. it will need customising for a particular tool, but only once)
+
+# Default directory to look for options.h
+OPTIONS=clbcomp
+
+TARGETCFL += -DCALLABLE_COMPILER
+
+TOOLNAME=clbcomp
+TOOLDESTNAME=$(TOOLNAME)
+
+SRCDIR1=../../$(OPTIONS)
+SRCDIR2=../../cfe
+SRCDIR3=../../cppfe
+SRCDIR4=../../mip
+SRCDIR5=../../util
+
+SOURCES=clbcomp/clbcomp.c cppfe/xsyn.c cfe/syn.c cppfe/xsem.c cfe/sem.c \
+	cppfe/xbuiltin.c mip/builtin.c mip/aetree.c mip/misc.c \
+	cfe/simplify.c clbcomp/clb_store.c cppfe/xbind.c mip/bind.c \
+	cppfe/overload.c cppfe/xlex.c cfe/lex.c \
+	mip/compiler.c cfe/pp.c\
+	mip/aeops.h mip/aetree.h mip/bind.h mip/builtin.h \
+	mip/defaults.h mip/defs.h mip/globals.h mip/store.h \
+	mip/util.h \
+	cfe/lex.h cfe/pp.h cfe/sem.h cfe/simplify.h \
+	clbcomp/target.h $(OPTIONS)/options.h \
+	cfe/syn.h cfe/vargen.h \
+COPY_ONLY=cl/stdh/assert.h cl/stdh/signal.h cl/stdh/ctype.h \
+	cl/stdh/stdarg.h cl/stdh/errno.h cl/stdh/stddef.h \
+	cl/stdh/float.h cl/stdh/stdio.h cl/stdh/limits.h \
+	cl/stdh/stdlib.h cl/stdh/locale.h cl/stdh/string.h \
+	cl/stdh/math.h cl/stdh/time.h cl/stdh/setjmp.h \
+	mip/miperrs.h cfe/feerrs.h
+
+OBJALL=clbcomp xsyn xsem xbuiltin aetree misc simplify clb_store xbind \
+	overload xlex compiler pp
+
+DERIVED = derived/errors.h derived/tags.h
+
+EXTDIR1=../../../clx
+DEPENDINC1=../../../clx
+EXTDIR2=../../../armdbg
+DEPENDINC2=../../../armdbg
+
+tool_only: $(DERIVED)
+
+# Note this only makes the derived source when dependency determination
+# is taking place during the make -f Megamake
+# Host specific versions of this must be output to the Makefile
+# in the host and tool dependent part of Megamake.
+
+derived/errors.h: derived/genhdrs
+derived/errors.h: $(DEPSRCDIR)/../../mip/miperrs.h
+derived/errors.h: $(DEPSRCDIR)/../../cfe/feerrs.h
+	derived/genhdrs -ederived/errors.h -q$(DEPSRCDIR)/../../mip/miperrs.h \
+	  -q$(DEPSRCDIR)/../../cfe/feerrs.h -s
+
+derived/tags.h: $(DEPSRCDIR)/../../mip/miperrs.h
+derived/tags.h: $(DEPSRCDIR)/../../cfe/feerrs.h
+	mktag -pz $(DEPSRCDIR)/../../mip/miperrs.h $(DEPSRCDIR)/../../cfe/feerrs.h derived/tags.h
+	mkmsg -pqz $(DEPSRCDIR)/../../mip/miperrs.h $(DEPSRCDIR)/../../cfe/feerrs.h derived/tags.h armcpp.err 
+
+derived/genhdrs: $(DEPSRCDIR)/../../util/genhdrs.c
+	gcc -O2 -o derived/genhdrs $(DEPSRCDIR)/../../util/genhdrs.c
+
+tool_local: $$(HOST)_lib
+	echo "Making local $(TOOLNAME)-specific boilerplate"
+	echo ""					    >> $(MAKEFILE)
+	echo -n "HDRFILES="				>> $(MAKEFILE)
+	if [ X$(GENVIA) = X ] ; then \
+	  echo $(HDRFILES:%=%.h) | $(PN) $(PFL) -a - "%F " >> $(MAKEFILE) ; \
+	else \
+	  $(PN) $(PFL) " -v%F%;" $(GENVIA)		 >> $(MAKEFILE) ; \
+	  echo $(HDRFILES:%=%.h) | $(PN) $(PFL) -a - "%F%;" > ./$(GENVIA)  ; \
+	fi
+	echo ""					    >> $(MAKEFILE)
+	echo -n "HDRPATHS="				>> $(MAKEFILE)
+	echo $(HDRFILES:%=../../cl/stdh/%.h) \
+	    | $(PN) $(PFL) -a - "%F "		      >> $(MAKEFILE)
+	echo ""					    >> $(MAKEFILE)
+	echo ""					    >> $(MAKEFILE)
+	$(PN) $(PFL) "{DERDIR}%j%R%: {DERDIR}%j%R %F %F%;" \
+	    errors.h genhdrs$(ESUFFIX) \
+	    ../../mip/miperrs.h  ../../cfe/feerrs.h \
+							   >> $(MAKEFILE)
+	$(PN) $(PFL) "% {DERDIR}%j%R -e{DERDIR}%j%R -q%F -q%F -s%;%;%;" \
+	    genhdrs$(ESUFFIX) errors.h ../../mip/miperrs.h \
+	    ../../cfe/feerrs.h			    >> $(MAKEFILE)
+	$(PN) $(PFL) "{DERDIR}%j%R%: %F %F%;" \
+	    tags.h ../../mip/miperrs.h ../../cfe/feerrs.h \
+							   >> $(MAKEFILE)
+	$(PN) $(PFL) "% {MKTAG} -pz %F %F {DERDIR}%j%R%;" \
+	    ../../mip/miperrs.h ../../cfe/feerrs.h \
+	    tags.h					 >> $(MAKEFILE)
+	$(PN) $(PFL) "% {MKMSG} -pqz %F %F %R%;%;" \
+	    ../../mip/miperrs.h ../../cfe/feerrs.h \
+	    armcpp.err				     >> $(MAKEFILE)
+	$(PN) $(PFL) "%F%: %F%;" \
+	    derived/genhdrs$(ESUFFIX) ../../util/genhdrs.c >> $(MAKEFILE)
+	$(PN) $(PFL) "% {CL} {CFLAGS2} $(CFEOUT)%F %F%;%;" \
+	    derived/genhdrs ../../util/genhdrs.c       >> $(MAKEFILE)

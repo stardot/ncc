@@ -1,0 +1,56 @@
+# Copyright (C) Advanced RISC Machines 1997. All rights reserved
+# SPDX-Licence-Identifier: Apache-2.0
+#
+# RCS $Revision$
+# Checkin $Date$
+# Revising $Author$
+#
+# Makefile for peepgen and genhdrs on the PC. This is used by the
+# Megamake 3 system which needs to run these programs on the PC.
+# Megamake 2 built them only for Unix and did not use a makefile
+# to do it.
+#
+# Expects the environment variables OPTIONS and BACKEND to be set.
+# These give the directories in which it will look for options.h
+# and target.h respectively.
+#
+
+RM=del
+
+SRCDIR1=..\..\util
+EXTDIR1=..\..\..\clx
+EXTDIR2=..\..\mip
+
+CDOFL=/O2 /MD  -DNDEBUG # C debug and optimization flags
+CINCLS= -I$(SRCDIR1) -I$(EXTDIR1) -I$(EXTDIR2) -I$(OPTIONS) -I$(BACKEND) # C include flags
+CFLAGS= -D_CONSOLE -D_MBCS -DNLS /nologo /Zp4 /W3 /GX $(CDOFL) $(CINCLS)
+
+CC=cl -D__STDC__ -c
+CL=cl -D__STDC__
+
+LINK=link /INCREMENTAL:no
+
+all: peepgen.exe genhdrs.exe
+
+peepgen.exe: peepgen.obj
+	$(LINK) /SUBSYSTEM:CONSOLE /OUT:peepgen.exe peepgen.obj
+	@echo "Made peepgen"
+
+peepgen.obj: $(SRCDIR1)\peepgen.c $(EXTDIR1)\host.h $(EXTDIR2)\globals.h $(OPTIONS)\options.h
+	$(CC) $(CFLAGS) -o peepgen.obj $(SRCDIR1)\peepgen.c
+
+genhdrs.exe: genhdrs.obj
+	$(LINK) /SUBSYSTEM:CONSOLE /OUT:genhdrs.exe genhdrs.obj
+	@echo "Made genhdrs"
+
+genhdrs.obj: $(SRCDIR1)\genhdrs.c
+	$(CC) $(CFLAGS) -o genhdrs.obj $(SRCDIR1)\genhdrs.c
+
+tests: $(OBJALL)
+	@echo No tests
+
+clean:
+	$(RM) peepgen.exe
+	$(RM) peepgen.obj
+	$(RM) genhdrs.exe
+	$(RM) genhdrs.obj
